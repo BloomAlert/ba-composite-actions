@@ -1,0 +1,33 @@
+name: 'Setup Python'
+description: 'Basic steps to setup python env and install deps'
+inputs:
+  python-version:
+    description: 'python version'
+    required: true
+    default: '3.10'
+  bloompy-gar-path:
+    description: 'bloompy gar path'
+    required: true
+# outputs:
+#   random-number:
+#     description: "Random number"
+#     value: ${{ steps.random-number-generator.outputs.random-number }}
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Install Pip
+      run: |
+        python -m pip install --upgrade pip
+        pip install keyring
+        pip install keyrings.google-artifactregistry-auth
+      shell: bash
+    - name: Install dependencies
+      run: |
+        pip install flake8 pytest pytest-cov
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        pip install --index-url ${{ inputs.bloompy-gar-path }} bloompy
+      shell: bash
