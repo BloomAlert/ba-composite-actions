@@ -1,0 +1,44 @@
+name: 'Deploy microservice to Cloud Run'
+description: 'Auth to GCP and deploy Cloud Run Instance with ms'
+inputs:
+  service:
+    description: 'GCP Service'
+    required: true
+  region:
+    description: 'GCP Region'
+    required: true
+  image:
+    description: 'Image to Upload'
+    required: true
+  cloudrun-flags:
+    description: 'CR Flags'
+    required: true
+  cloudrun-env-vars:
+    description: 'CR Env vars'
+    required: true
+  GCP_SERVICE_ACCOUNT: 
+    description: 'GCP Service Account'
+    required: true
+
+  
+runs:
+  using: "composite"
+  steps:
+    - name: 'Authenticate to Google Cloud'
+      id: 'auth'
+      uses: 'google-github-actions/auth@v0'
+      with:
+        credentials_json: ${{ inputs.GCP_SERVICE_ACCOUNT }}
+    - name: Deploy to Cloud Run
+      id: deploy
+      uses: google-github-actions/deploy-cloudrun@v0
+      with:
+        service: ${{ inputs.service }}
+        region: ${{ inputs.location }}
+        image: ${{ inputs.image }}
+        gcloud_component: beta
+        flags: ${{ inputs.cloudrun-flags }}
+        env_vars: ${{ inputs.cloudrun-env-vars }}
+    - name: Show Output
+      run: echo ${{ steps.deploy.outputs.url }}
+      shell: bash
