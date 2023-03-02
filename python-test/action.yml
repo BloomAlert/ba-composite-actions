@@ -1,0 +1,78 @@
+name: 'Setup Python and Test'
+description: 'Setup python env and install deps for testing and testing'
+inputs:
+  python-version:
+    description: 'python version'
+    required: true
+    default: '3.10'
+  bloompy-gar-path:
+    description: 'bloompy gar path'
+    required: true
+  requirements-file-name:
+    description: 'python requirements filename with dependencies to install'
+    default: 'requirements-test.txt'
+  pytest-cov:
+    description: 'Pytest route to cov'
+    default: './app/src'
+  pytest-cov-fail-under:
+    description: 'Threshold to cov with pytest'
+    default: '40'
+  pytest-maxfail:
+    description: 'Max failure times with pytest'
+    default: '1'
+  pytest-coverage-path:
+    description: 'path to save pytest coverage results'
+    default: './pytest-coverage.txt'
+  GCP_SERVICE_ACCOUNT: 
+    description: 'GCP Service Account'
+    required: true
+  CODECOV_TOKEN:
+    description: 'Token to auth Codecov'
+    required: true 
+  
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/checkout@v3
+    - name: 'Authenticate to Google Cloud'
+      id: 'auth'
+      uses: 'google-github-actions/auth@v0'
+      with:
+        export_environment_variables: true
+        credentials_json: ${{ inputs.GCP_SERVICE_ACCOUNT }}
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f ${{ inputs.requirements-file-name }} ]; then pip install -r ${{ inputs.requirements-file-name }}; fi
+        pip install --index-url ${{ inputs.bloompy-gar-path }} bloompy
+      shell: bash
+    - name: Lint with flake8
+      run: |
+        # stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      shell: bash
+    - name: Test with pytest
+      run: |
+        pytest -v --junitxml=pytest.xml --cov-report=term-missing \
+        --cov ${{ inputs.pytest-cov }} \
+        --cov-fail-under=${{ inputs.pytest-cov-fail-under }} \
+        --maxfail=${{ inputs.pytest-maxfail }}
+      shell: bash
+    - name: Pytest coverage comment
+      uses: MishaKav/pytest-coverage-comment@main
+      id: coverageComment
+      with:
+        pytest-coverage-path:  ${{ inputs.pytest-coverage-path }}
+        junitxml-path: ./pytest.xml
+    - name: Upload coverage reports to Codecov
+      run: |
+        curl -Os https://uploader.codecov.io/latest/linux/codecov
+        chmod +x codecov
+        ./codecov -t ${{ inputs.CODECOV_TOKEN }}
+      shell: bash
