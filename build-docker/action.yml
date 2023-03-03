@@ -69,4 +69,4 @@ runs:
         push: true
         tags: ${{ inputs.GCP_LOCATION }}-docker.pkg.dev/${{ inputs.GCP_PROJECT_ID }}/${{ inputs.GCP_ARTIFACT_REPOSITORY }}/${{ inputs.SERVICE }}:${{ github.sha }}
         build-args: index_url=${{ inputs.BLOOMPY_GAR_PATH }}
-        secrets: gar_service_account=${{ secrets.GCP_SERVICE_ACCOUNT }}
+        secrets: gar_service_account=${{ inputs.GCP_SERVICE_ACCOUNT }}
