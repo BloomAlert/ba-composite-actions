@@ -73,3 +73,5 @@ runs:
         tags: ${{ inputs.GCP_LOCATION }}-docker.pkg.dev/${{ inputs.GCP_PROJECT_ID }}/${{ inputs.GCP_ARTIFACT_REPOSITORY }}/${{ inputs.GCP_SERVICE_NAME }}:${{ github.sha }}
         build-args: index_url=${{ inputs.BLOOMPY_GAR_PATH }}
         secrets: gar_service_account=${{ inputs.GCP_SERVICE_ACCOUNT }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
