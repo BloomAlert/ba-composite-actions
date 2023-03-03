@@ -20,6 +20,9 @@ inputs:
   GCP_PROJECT_ID:
     description: 'GCP Project ID'
     required: true
+  GCP_SERVICE_NAME:
+    description: 'Service name to upload to GCP'
+    required: true
   GCP_ARTIFACT_REPOSITORY:
     description: 'Artifact Repository'
     required: true
@@ -67,6 +70,6 @@ runs:
       with:
         context: ${{ inputs.dockerfile-context }}
         push: true
-        tags: ${{ inputs.GCP_LOCATION }}-docker.pkg.dev/${{ inputs.GCP_PROJECT_ID }}/${{ inputs.GCP_ARTIFACT_REPOSITORY }}/${{ inputs.SERVICE }}:${{ github.sha }}
+        tags: ${{ inputs.GCP_LOCATION }}-docker.pkg.dev/${{ inputs.GCP_PROJECT_ID }}/${{ inputs.GCP_ARTIFACT_REPOSITORY }}/${{ inputs.GCP_SERVICE_NAME }}:${{ github.sha }}
         build-args: index_url=${{ inputs.BLOOMPY_GAR_PATH }}
         secrets: gar_service_account=${{ inputs.GCP_SERVICE_ACCOUNT }}
