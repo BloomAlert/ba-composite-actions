@@ -1,0 +1,62 @@
+name: 'Build with Podman and push to GCR'
+description: 'Setup python env and install deps for testing and testing'
+inputs:
+  python-version:
+    description: 'python version'
+    required: true
+    default: '3.10'
+  GCP_SERVICE_ACCOUNT: 
+    description: 'GCP Service Account'
+    required: true
+  PROJECT_ID:
+    description: 'GCP Project ID'
+    required: true
+  REPOSITORY:
+    description: 'Repository name'
+    required: true
+  SERVICE:
+    description: 'Concatenated github repository name and environment'
+    required: true
+  BLOOMPY_GAR_PATH:
+    description: 'GAR Path for Bloompy library'
+    required: true
+  GAR_LOCATION:
+    description: 'GCP Location for Google Application Registry'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ inputs.python-version }}
+    - id: 'auth'
+      name: 'Authenticate to Google Cloud'
+      uses: 'google-github-actions/auth@v0'
+      with:
+        export_environment_variables: true
+        credentials_json: ${{ inputs.GCP_SERVICE_ACCOUNT }}
+    - name: Log in to GCR
+      uses: redhat-actions/podman-login@v1
+      with:
+        username: _json_key
+        password: ${{ inputs.GCP_SERVICE_ACCOUNT }}
+        registry: ${{ inputs.GAR_LOCATION }}-docker.pkg.dev/${{ inputs.PROJECT_ID }}
+    - name: Build image
+      run: |
+        podman build -q --format docker -t ${{ inputs.SERVICE }}:${{ github.sha }} \
+        --build-arg index_url=${{ inputs.BLOOMPY_GAR_PATH }} \
+        --secret id=gar_service_account,src=${{ inputs.GOOGLE_APPLICATION_CREDENTIALS }} .
+      shell: bash
+    - name: Push to GCR
+      id: push-to-gcr
+      uses: redhat-actions/push-to-registry@v2
+      with:
+        image: ${{ inputs.SERVICE }}
+        registry: ${{ inputs.GAR_LOCATION }}-docker.pkg.dev/${{ inputs.PROJECT_ID }}/${{ inputs.REPOSITORY }}
+        tags: ${{ github.sha }}
+    - name: Print image url
+      run: echo "Image pushed to ${{ steps.push-to-gcr.outputs.registry-paths }}"
+      shell: bash
