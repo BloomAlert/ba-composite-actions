@@ -48,7 +48,7 @@ runs:
       run: |
         podman build -q --format docker -t ${{ inputs.SERVICE }}:${{ github.sha }} \
         --build-arg index_url=${{ inputs.BLOOMPY_GAR_PATH }} \
-        --secret id=gar_service_account,src=${{ inputs.GOOGLE_APPLICATION_CREDENTIALS }} .
+        --secret id=gar_service_account,src=${{ env.GOOGLE_APPLICATION_CREDENTIALS }} .
       shell: bash
     - name: Push to GCR
       id: push-to-gcr
