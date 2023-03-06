@@ -34,7 +34,7 @@ runs:
       uses: google-github-actions/deploy-cloudrun@v0
       with:
         service: ${{ inputs.service }}
-        region: ${{ inputs.location }}
+        region: ${{ inputs.region }}
         image: ${{ inputs.image }}
         gcloud_component: beta
         flags: ${{ inputs.cloudrun-flags }}
