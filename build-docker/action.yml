@@ -29,6 +29,9 @@ inputs:
   BLOOMPY_GAR_PATH:
     description: 'Bloompy GAR Path'
     required: true
+  USE_BUILD_CACHE:
+    description: 'Use build cache'
+    default: 'false'
 runs:
   using: "composite"
   steps:
@@ -39,7 +42,7 @@ runs:
         python-version: ${{ inputs.python-version }}
     - id: 'auth'
       name: 'Authenticate to Google Cloud'
-      uses: 'google-github-actions/auth@v0'
+      uses: 'google-github-actions/auth@v2'
       with:
         export_environment_variables: true
         credentials_json: ${{ inputs.GCP_SERVICE_ACCOUNT }}
@@ -75,3 +78,4 @@ runs:
         secrets: gar_service_account=${{ inputs.GCP_SERVICE_ACCOUNT }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
+        no-cache: ${{ inputs.USE_BUILD_CACHE }}
