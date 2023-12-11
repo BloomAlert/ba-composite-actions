@@ -29,7 +29,7 @@ inputs:
   BLOOMPY_GAR_PATH:
     description: 'Bloompy GAR Path'
     required: true
-  USE_BUILD_CACHE:
+  NO_BUILD_CACHE:
     description: 'Use build cache'
     default: 'false'
 runs:
@@ -78,4 +78,4 @@ runs:
         secrets: gar_service_account=${{ inputs.GCP_SERVICE_ACCOUNT }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
-        no-cache: ${{ inputs.USE_BUILD_CACHE }}
+        no-cache: ${{ inputs.NO_BUILD_CACHE }}
