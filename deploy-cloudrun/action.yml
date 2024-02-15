@@ -26,12 +26,12 @@ runs:
   steps:
     - name: 'Authenticate to Google Cloud'
       id: 'auth'
-      uses: 'google-github-actions/auth@v0'
+      uses: 'google-github-actions/auth@v2'
       with:
         credentials_json: ${{ inputs.GCP_SERVICE_ACCOUNT }}
     - name: Deploy to Cloud Run
       id: deploy
-      uses: google-github-actions/deploy-cloudrun@v0
+      uses: google-github-actions/deploy-cloudrun@v2
       with:
         service: ${{ inputs.service }}
         region: ${{ inputs.region }}
