@@ -49,6 +49,9 @@ runs:
       with:
         export_environment_variables: true
         credentials_json: ${{ inputs.GCP_SERVICE_ACCOUNT }}
+    - id: "setup-gcloud"
+      name: "Setup gcloud"
+      uses: "google-github-actions/setup-gcloud@v2"
     - name: "Use gcloud CLI to verify the existence of the artifact repository and create it if necessary"
       if: ${{ inputs.verify-gcloud-artifact == 'true' }}
       run: |
