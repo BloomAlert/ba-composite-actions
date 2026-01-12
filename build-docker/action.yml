@@ -14,7 +14,7 @@ inputs:
   dockerfile-file:
     description: "Name of the Dockerfile"
     default: Dockerfile
-  checkout_ref:
+  checkout-ref:
     description: "The branch, tag or SHA to checkout."
     required: true
   GCP_SERVICE_ACCOUNT:
@@ -43,7 +43,7 @@ runs:
   steps:
     - uses: actions/checkout@v6
       with:
-         ref: ${{ inputs.checkout_ref }}
+         ref: ${{ inputs.checkout-ref }}
     - name: Set up Python
       uses: actions/setup-python@v6
       with:
