@@ -85,7 +85,7 @@ runs:
         context: ${{ inputs.dockerfile-context }}
         file: ${{ inputs.dockerfile-file }}
         push: true
-        tags: ${{ inputs.GCP_LOCATION }}-docker.pkg.dev/${{ inputs.GCP_PROJECT_ID }}/${{ inputs.GCP_ARTIFACT_REPOSITORY }}/${{ inputs.GCP_SERVICE_NAME }}:${{ github.sha }}
+        tags: ${{ inputs.GCP_LOCATION }}-docker.pkg.dev/${{ inputs.GCP_PROJECT_ID }}/${{ inputs.GCP_ARTIFACT_REPOSITORY }}/${{ inputs.GCP_SERVICE_NAME }}:${{ inputs.checkout-ref }}
         build-args: index_url=${{ inputs.BLOOMPY_GAR_PATH }}
         secrets: gar_service_account=${{ inputs.GCP_SERVICE_ACCOUNT }}
         cache-from: type=gha
