@@ -15,3 +15,10 @@ This repo contains the following structure:
 
 To create more composite actions, create a folder with a descriptive name, 
 and inside add `action.yml` file with the composite action. 
+
+## Google Cloud credentials
+
+The Google auth action can generate temporary `gha-creds-*.json` files in the
+GitHub workspace. Downstream repositories that build or package workspace
+contents should ignore this pattern in `.gitignore`, `.dockerignore`, and any
+similar artifact include/exclude configuration.
