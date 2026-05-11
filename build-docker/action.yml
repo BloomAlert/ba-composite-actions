@@ -1,4 +1,4 @@
-name: "Setup QEMU, docker buildx, Build and push image to GCR"
+name: "Setup docker buildx, Build and push image to GCR"
 description: "Setup python env and install deps for testing and testing"
 inputs:
   python-version:
@@ -68,8 +68,6 @@ runs:
         --location=${{ inputs.GCP_LOCATION }} --repository-format=docker; \
         fi
       shell: bash
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v4
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4
     - name: Docker Auth
