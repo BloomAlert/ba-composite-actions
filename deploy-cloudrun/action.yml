@@ -16,6 +16,28 @@ inputs:
   cloudrun-env-vars:
     description: 'CR Env vars'
     required: true
+  cloudrun-secrets:
+    description: |-
+      Newline- or comma-separated KEY=SECRET:VERSION pairs served from Secret
+      Manager, e.g. `NEW_RELIC_LICENSE_KEY=new-relic-license-key-prod:latest`.
+      Keys starting with `/` are mounted as volumes instead of env vars.
+
+      Optional. Left empty, this action behaves exactly as before.
+    required: false
+    default: ''
+  cloudrun-secrets-update-strategy:
+    description: |-
+      'merge' keeps secrets already on the service that are not listed here.
+      'overwrite' makes this deploy authoritative: secrets not listed are removed.
+    required: false
+    default: 'merge'
+  cloudrun-env-vars-update-strategy:
+    description: |-
+      'merge' keeps env vars already on the service that are not listed here —
+      which is why a plaintext literal can outlive the migration that replaced it.
+      'overwrite' makes this deploy authoritative.
+    required: false
+    default: 'merge'
   GCP_SERVICE_ACCOUNT: 
     description: 'GCP Service Account'
     required: true
@@ -43,6 +65,9 @@ runs:
         gcloud_component: beta
         flags: ${{ inputs.cloudrun-flags }}
         env_vars: ${{ inputs.cloudrun-env-vars }}
+        env_vars_update_strategy: ${{ inputs.cloudrun-env-vars-update-strategy }}
+        secrets: ${{ inputs.cloudrun-secrets }}
+        secrets_update_strategy: ${{ inputs.cloudrun-secrets-update-strategy }}
     - name: Show Output
       run: echo ${{ steps.deploy.outputs.url }}
       shell: bash
