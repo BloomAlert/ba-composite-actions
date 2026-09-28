@@ -1,0 +1,44 @@
+# Temporary: proves the ubuntu-26.04 breakages. Delete before merge.
+name: u26-canary
+on:
+  push:
+    branches: [fix/build-docker-drop-setup-python]
+permissions:
+  contents: read
+jobs:
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-26.04]
+        version: ["3.13.5", "3.13.11", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.version }}
+      - run: python --version
+  playwright:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-26.04]
+        version: ["1.60.0", "1.63.0"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: npx -y playwright@${{ matrix.version }} install chromium
+  gcloud-system-python:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-26.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: google-github-actions/setup-gcloud@v3
+      - run: |
+          python3 --version
+          gcloud --version
+          gcloud info --format='value(basic.python_location)'

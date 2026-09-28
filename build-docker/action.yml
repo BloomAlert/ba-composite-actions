@@ -2,9 +2,9 @@ name: "Setup docker buildx, Build and push image to GCR"
 description: "Setup python env and install deps for testing and testing"
 inputs:
   python-version:
-    description: "python version"
-    required: true
-    default: "3.10"
+    description: "Deprecated and ignored."
+    deprecationMessage: "Unused: the Docker build has its own Python. Safe to remove."
+    required: false
   verify-gcloud-artifact:
     description: "String boolean to verify or not the existence of artifact"
     default: "false"
@@ -44,10 +44,6 @@ runs:
     - uses: actions/checkout@v6
       with:
          ref: ${{ inputs.checkout-ref }}
-    - name: Set up Python
-      uses: actions/setup-python@v6
-      with:
-        python-version: ${{ inputs.python-version }}
     - id: "auth"
       name: "Authenticate to Google Cloud"
       uses: "google-github-actions/auth@v3"
