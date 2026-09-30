@@ -1,10 +1,6 @@
 name: "Setup docker buildx, Build and push image to GCR"
-description: "Setup python env and install deps for testing and testing"
+description: "Build a Docker image with buildx (GHA cache) and push it to Artifact Registry"
 inputs:
-  python-version:
-    description: "Deprecated and ignored."
-    deprecationMessage: "Unused: the Docker build has its own Python. Safe to remove."
-    required: false
   verify-gcloud-artifact:
     description: "String boolean to verify or not the existence of artifact"
     default: "false"
