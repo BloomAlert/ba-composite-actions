@@ -1,0 +1,22 @@
+# TEMPORARY: proves a caller still passing the removed input only gets a
+# warning. Delete before merging.
+name: input-canary
+on:
+  push:
+    branches: [chore/build-docker-drop-python-version-input]
+jobs:
+  stale-caller:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./build-docker
+        continue-on-error: true
+        with:
+          python-version: "3.13.11"
+          checkout-ref: ${{ github.sha }}
+          GCP_SERVICE_ACCOUNT: "{}"
+          GCP_LOCATION: us-west2
+          GCP_PROJECT_ID: dummy
+          GCP_SERVICE_NAME: dummy
+          GCP_ARTIFACT_REPOSITORY: dummy
+          BLOOMPY_GAR_PATH: dummy
