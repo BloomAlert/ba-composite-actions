@@ -1,0 +1,46 @@
+# .github/workflows/cicd.yaml in etl-ingestion-ews-gcp (replaces ~330 lines)
+name: cicd
+
+on:
+  push:
+    branches: [staging, prod]
+    paths:
+      - ".github/workflows/cicd.yaml"
+      - "deploy/runtime.yaml"
+      - "src/**"
+      - ".python-version"
+      - ".dockerignore"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "Dockerfile"
+  workflow_dispatch: # run it from the staging or prod branch
+    inputs:
+      dry_run:
+        description: Print the gcloud plan and orphans only
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  build:
+    if: ${{ !inputs.dry_run }}
+    permissions:
+      contents: read
+      id-token: write
+    uses: BloomAlert/ba-composite-actions/.github/workflows/etl-build.yaml@<40-hex sha> # v1.0.0
+    with:
+      environment: ${{ github.ref_name }}
+    secrets: inherit
+
+  deploy:
+    needs: build
+    if: ${{ !cancelled() && needs.build.result != 'failure' }}
+    permissions:
+      contents: read
+      id-token: write
+    uses: BloomAlert/ba-composite-actions/.github/workflows/etl-deploy.yaml@<40-hex sha> # v1.0.0
+    with:
+      environment: ${{ github.ref_name }}
+      dry_run: ${{ inputs.dry_run == true }}
+    secrets: inherit

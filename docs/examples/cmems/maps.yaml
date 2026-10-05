@@ -1,0 +1,259 @@
+# deploy/maps.yaml in etl-ingestion-cmems-gcp (tier wp-md-push: 31 products)
+flow: maps
+dockerfile: Dockerfile.maps
+image: map                       # both tiers run the same image
+job:
+  service_account_var: GCP_MAP_JOB_SERVICE_ACCOUNT_EMAIL
+  cpu: 2
+  memory: 4Gi
+  timeout: 900s
+env:
+  - USE_CLOUD_LOGGING
+  - GCP_BUCKET_NAME=GCP_MAPS_BUCKET
+  - MAP_ARRIVAL_TOPIC
+time_zone: America/Santiago
+retry: {count: 16, backoff_seconds: 1800}   # was map_retry in every scheduler payload
+next: etl-ingestion-cmems-timeseries          # was trigger_timeseries; gets the same args/labels
+instances:  # replaces: the exact old resources this instance supersedes (RUN-04)
+  - name: spm-01
+    schedule: "0 8 * * *"
+    args: [--ts-id, SPM-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-spm-01-{env}
+      - workflow-map-ingestion-spm-01-{env}
+      - schedule-map-ingestion-spm-01-{env}
+  - name: spm-01-middle-east
+    schedule: "0 7 * * *"
+    args: [--ts-id, SPM-01, --region, middle-east, --source, auto]
+    replaces:
+      - schedule-map-ingestion-spm-01-middle-east-{env}
+  - name: chl-01
+    schedule: "5 8 * * *"
+    args: [--ts-id, CHL-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-chl-01-{env}
+      - workflow-map-ingestion-chl-01-{env}
+      - schedule-map-ingestion-chl-01-{env}
+  - name: chl-01-middle-east
+    schedule: "0 7 * * *"
+    args: [--ts-id, CHL-01, --region, middle-east, --source, auto]
+    replaces:
+      - schedule-map-ingestion-chl-01-middle-east-{env}
+  - name: zsd-01
+    schedule: "10 8 * * *"
+    args: [--ts-id, ZSD-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-zsd-01-{env}
+      - workflow-map-ingestion-zsd-01-{env}
+      - schedule-map-ingestion-zsd-01-{env}
+  - name: zsd-01-middle-east
+    schedule: "0 7 * * *"
+    args: [--ts-id, ZSD-01, --region, middle-east, --source, auto]
+    replaces:
+      - schedule-map-ingestion-zsd-01-middle-east-{env}
+  - name: sst-02
+    schedule: "20 8 * * *"
+    args: [--ts-id, SST-02, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-sst-02-{env}
+      - workflow-map-ingestion-sst-02-{env}
+      - schedule-map-ingestion-sst-02-{env}
+  - name: sst-02-middle-east
+    schedule: "0 7 * * *"
+    args: [--ts-id, SST-02, --region, middle-east, --source, auto]
+    replaces:
+      - schedule-map-ingestion-sst-02-middle-east-{env}
+  - name: uo-01
+    schedule: "20 8 * * *"
+    args: [--ts-id, UO-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-uo-01-{env}
+      - workflow-map-ingestion-uo-01-{env}
+      - schedule-map-ingestion-uo-01-{env}
+  - name: vo-01
+    schedule: "20 8 * * *"
+    args: [--ts-id, VO-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-vo-01-{env}
+      - workflow-map-ingestion-vo-01-{env}
+      - schedule-map-ingestion-vo-01-{env}
+  - name: so-01
+    schedule: "20 8 * * *"
+    args: [--ts-id, SO-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-so-01-{env}
+      - workflow-map-ingestion-so-01-{env}
+      - schedule-map-ingestion-so-01-{env}
+  - name: wo-01
+    schedule: "20 8 * * *"
+    args: [--ts-id, WO-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-wo-01-{env}
+      - workflow-map-ingestion-wo-01-{env}
+      - schedule-map-ingestion-wo-01-{env}
+  - name: nppv-01
+    schedule: "25 9 * * *"
+    args: [--ts-id, NPPV-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-nppv-01-{env}
+      - workflow-map-ingestion-nppv-01-{env}
+      - schedule-map-ingestion-nppv-01-{env}
+  - name: o2-01
+    schedule: "25 9 * * *"
+    args: [--ts-id, O2-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-o2-01-{env}
+      - workflow-map-ingestion-o2-01-{env}
+      - schedule-map-ingestion-o2-01-{env}
+  - name: dissic-01
+    schedule: "25 9 * * *"
+    args: [--ts-id, DISSIC-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-dissic-01-{env}
+      - workflow-map-ingestion-dissic-01-{env}
+      - schedule-map-ingestion-dissic-01-{env}
+  - name: ph-01
+    schedule: "25 9 * * *"
+    args: [--ts-id, PH-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-ph-01-{env}
+      - workflow-map-ingestion-ph-01-{env}
+      - schedule-map-ingestion-ph-01-{env}
+  - name: talk-01
+    schedule: "30 9 * * *"
+    args: [--ts-id, TALK-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-talk-01-{env}
+      - workflow-map-ingestion-talk-01-{env}
+      - schedule-map-ingestion-talk-01-{env}
+  - name: spco2-01
+    schedule: "30 9 * * *"
+    args: [--ts-id, SPCO2-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-spco2-01-{env}
+      - workflow-map-ingestion-spco2-01-{env}
+      - schedule-map-ingestion-spco2-01-{env}
+  - name: fe-01
+    schedule: "30 9 * * *"
+    args: [--ts-id, FE-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-fe-01-{env}
+      - workflow-map-ingestion-fe-01-{env}
+      - schedule-map-ingestion-fe-01-{env}
+  - name: no3-01
+    schedule: "30 9 * * *"
+    args: [--ts-id, NO3-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-no3-01-{env}
+      - workflow-map-ingestion-no3-01-{env}
+      - schedule-map-ingestion-no3-01-{env}
+  - name: po4-01
+    schedule: "30 9 * * *"
+    args: [--ts-id, PO4-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-po4-01-{env}
+      - workflow-map-ingestion-po4-01-{env}
+      - schedule-map-ingestion-po4-01-{env}
+  - name: si-01
+    schedule: "45 9 * * *"
+    args: [--ts-id, SI-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-si-01-{env}
+      - workflow-map-ingestion-si-01-{env}
+      - schedule-map-ingestion-si-01-{env}
+  - name: kd-01
+    schedule: "45 9 * * *"
+    args: [--ts-id, KD-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-kd-01-{env}
+      - workflow-map-ingestion-kd-01-{env}
+      - schedule-map-ingestion-kd-01-{env}
+  - name: chl-03
+    schedule: "45 9 * * *"
+    args: [--ts-id, CHL-03, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-chl-03-{env}
+      - workflow-map-ingestion-chl-03-{env}
+      - schedule-map-ingestion-chl-03-{env}
+  - name: phyc-01
+    schedule: "30 9 * * *"
+    args: [--ts-id, PHYC-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-phyc-01-{env}
+      - workflow-map-ingestion-phyc-01-{env}
+      - schedule-map-ingestion-phyc-01-{env}
+  - name: diato-01
+    schedule: "0 10 * * *"
+    args: [--ts-id, DIATO-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-diato-01-{env}
+      - workflow-map-ingestion-diato-01-{env}
+      - schedule-map-ingestion-diato-01-{env}
+  - name: dino-01
+    schedule: "5 10 * * *"
+    args: [--ts-id, DINO-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-dino-01-{env}
+      - workflow-map-ingestion-dino-01-{env}
+      - schedule-map-ingestion-dino-01-{env}
+  - name: green-01
+    schedule: "5 10 * * *"
+    args: [--ts-id, GREEN-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-green-01-{env}
+      - workflow-map-ingestion-green-01-{env}
+      - schedule-map-ingestion-green-01-{env}
+  - name: hapto-01
+    schedule: "10 10 * * *"
+    args: [--ts-id, HAPTO-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-hapto-01-{env}
+      - workflow-map-ingestion-hapto-01-{env}
+      - schedule-map-ingestion-hapto-01-{env}
+  - name: micro-01
+    schedule: "15 10 * * *"
+    args: [--ts-id, MICRO-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-micro-01-{env}
+      - workflow-map-ingestion-micro-01-{env}
+      - schedule-map-ingestion-micro-01-{env}
+  - name: nano-01
+    schedule: "20 10 * * *"
+    args: [--ts-id, NANO-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-nano-01-{env}
+      - workflow-map-ingestion-nano-01-{env}
+      - schedule-map-ingestion-nano-01-{env}
+  - name: pico-01
+    schedule: "20 10 * * *"
+    args: [--ts-id, PICO-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-pico-01-{env}
+      - workflow-map-ingestion-pico-01-{env}
+      - schedule-map-ingestion-pico-01-{env}
+  - name: prochlo-01
+    schedule: "25 10 * * *"
+    args: [--ts-id, PROCHLO-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-prochlo-01-{env}
+      - workflow-map-ingestion-prochlo-01-{env}
+      - schedule-map-ingestion-prochlo-01-{env}
+  - name: prokar-01
+    schedule: "30 10 * * *"
+    args: [--ts-id, PROKAR-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-prokar-01-{env}
+      - workflow-map-ingestion-prokar-01-{env}
+      - schedule-map-ingestion-prokar-01-{env}
+  - name: cdm-01
+    schedule: "45 10 * * *"
+    args: [--ts-id, CDM-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-cdm-01-{env}
+      - workflow-map-ingestion-cdm-01-{env}
+      - schedule-map-ingestion-cdm-01-{env}
+  - name: cdm-01-middle-east
+    schedule: "0 7 * * *"
+    args: [--ts-id, CDM-01, --region, middle-east, --source, auto]
+    replaces:
+      - schedule-map-ingestion-cdm-01-middle-east-{env}
