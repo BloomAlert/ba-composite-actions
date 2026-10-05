@@ -1,4 +1,0 @@
-[
-  {"name": "keep-last-10", "action": {"type": "Keep"}, "mostRecentVersions": {"keepCount": 10}},
-  {"name": "delete-untagged-7d", "action": {"type": "Delete"}, "condition": {"tagState": "untagged", "olderThan": "7d"}}
-]

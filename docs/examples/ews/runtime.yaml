@@ -1,4 +1,9 @@
 # deploy/runtime.yaml in etl-ingestion-ews-gcp (one file per flow; single-flow repo -> no `flow`)
+# Existing single-job repo: keeps its current names, so adoption is an in-place update (no cutover).
+name: etl-ews-ingestion                  # job etl-ews-ingestion-<env>
+workflow_name: workflow-ews-ingestion    # workflow-ews-ingestion-<env>
+scheduler_name: schedule-ews-ingestion   # schedule-ews-ingestion-<env> (one instance, so no {instance})
+time_zone: America/Santiago
 dockerfile: Dockerfile
 image: main
 job:
@@ -28,7 +33,3 @@ env:
 instances:
   - name: main
     schedule: "*/15 * * * *"
-legacy:
-  - etl-ews-ingestion-{env}
-  - workflow-ews-ingestion-{env}
-  - schedule-ews-ingestion-{env}

@@ -1,0 +1,24 @@
+# deploy/maps-large.yaml in etl-ingestion-cmems-gcp (tier wp-lg-push: CHL-02, THETAO-01)
+flow: maps-large
+dockerfile: Dockerfile.maps
+image: map                       # both tiers run the same image
+job:
+  service_account_var: GCP_MAP_JOB_SERVICE_ACCOUNT_EMAIL
+  cpu: 2
+  memory: 8Gi
+  timeout: 1200s
+env:
+  - USE_CLOUD_LOGGING
+  - GCP_BUCKET_NAME=GCP_MAPS_BUCKET
+  - MAP_ARRIVAL_TOPIC
+time_zone: America/Santiago
+retry: {count: 16, backoff_seconds: 1800}   # was map_retry in every scheduler payload
+next: etl-ingestion-cmems-timeseries          # was trigger_timeseries; gets the same args/labels
+instances:
+  - {name: chl-02, schedule: "15 8 * * *", args: [--ts-id, CHL-02, --publish-arrival, --source, nrt]}
+  - {name: chl-02-middle-east, schedule: "0 7 * * *", args: [--ts-id, CHL-02, --region, middle-east, --source, auto]}
+  - {name: thetao-01, schedule: "20 8 * * *", args: [--ts-id, THETAO-01, --publish-arrival, --source, nrt]}
+  - {name: thetao-01-middle-east, schedule: "0 7 * * *", args: [--ts-id, THETAO-01, --region, middle-east, --source, auto]}
+legacy:                          # only this tier's old resources; deploy this tier before `maps`
+  - "*-map-ingestion-chl-02-*{env}"
+  - "*-map-ingestion-thetao-01-*{env}"

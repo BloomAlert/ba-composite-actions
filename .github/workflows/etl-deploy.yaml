@@ -96,11 +96,7 @@ jobs:
           REGION: ${{ vars.GCP_REGION }}
         run: |
           yq -o=json '.' "$DECL" > "$RUNNER_TEMP/decl.json"
-          jq -n \
-            --argjson jobs "$(gcloud run jobs list --project="$PROJECT" --region="$REGION" --format=json | jq '[.[] | {name: .metadata.name}]')" \
-            --argjson workflows "$(gcloud workflows list --project="$PROJECT" --location="$REGION" --format=json | jq '[.[] | {name: (.name | split("/") | last)}]')" \
-            --argjson schedulers "$(gcloud scheduler jobs list --project="$PROJECT" --location="$REGION" --format=json | jq '[.[] | {name: (.name | split("/") | last), state}]')" \
-            '{$jobs, $workflows, $schedulers}' > "$RUNNER_TEMP/live.json"
+          .etl-ci/etl/live.sh "$PROJECT" "$REGION" > "$RUNNER_TEMP/live.json"
 
       - name: Render plan (deploy) / report drift (drift)
         env:
