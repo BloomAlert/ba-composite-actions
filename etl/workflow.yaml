@@ -1,0 +1,51 @@
+# Generic Cloud Workflow, one per flow (RUN-01). Deployed by etl-deploy with
+# env JOB_NAME/GCP_PROJECT_ID/GCP_REGION/ENVIRONMENT. Input: {"args": [...], "labels": {...}}.
+# Manual run: gcloud workflows run <name> --data='{"args":["--start-dt","2026-10-01"]}' --labels=instance=manual
+main:
+  params: [input]
+  steps:
+    - init:
+        assign:
+          - final_args_list: ${default(map.get(input, "args"), [])}
+          - gcp_project_id: ${sys.get_env("GCP_PROJECT_ID")}
+          - gcp_region: ${sys.get_env("GCP_REGION")}
+          - environment: ${sys.get_env("ENVIRONMENT")}
+          - job_name: ${sys.get_env("JOB_NAME")}
+
+    - run_job:
+        try:
+          call: googleapis.run.v2.projects.locations.jobs.run
+          args:
+            name: ${"projects/" + gcp_project_id + "/locations/" + gcp_region + "/jobs/" + job_name}
+            body:
+              overrides:
+                containerOverrides:
+                  - args: ${final_args_list}
+            connector_params:
+              polling_policy:
+                initial_delay: 10.0
+                multiplier: 1.0
+                max_delay: 10.0
+          result: job_op
+        except:
+          as: e
+          steps:
+            # Copied verbatim from the fleet's workflows.yaml (ba-ops-notify legacy contract); #52 may change it.
+            - send_slack_notification:
+                call: http.post
+                args:
+                  url: ${"https://notify-slack-etl-error-" + environment + "-44376445617.us-west2.run.app"}
+                  body:
+                    job_name: ${job_name}
+                    gcp_project_id: ${gcp_project_id}
+                    gcp_region: ${gcp_region}
+                    error: ${e}
+                    final_args_list: ${final_args_list}
+                  auth:
+                    type: OIDC
+                next: unhandled_exception
+            - unhandled_exception:
+                raise: ${e}
+
+    - done:
+        return: ${job_name + " finished"}

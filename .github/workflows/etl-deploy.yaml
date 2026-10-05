@@ -1,0 +1,119 @@
+# Reusable ETL deploy + nightly drift check (docs/etl-workflows.md).
+# Reconciles one flow: 1 Cloud Run job + 1 Workflow + 1 Scheduler per instance (RUN-01..06).
+name: etl-deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: staging | prod; in deploy mode must equal the branch being deployed
+        type: string
+        required: true
+      declaration:
+        description: Path of the flow's runtime declaration
+        type: string
+        default: deploy/runtime.yaml
+      mode:
+        description: deploy | drift
+        type: string
+        default: deploy
+      dry_run:
+        description: Print every gcloud command and the orphan list; execute nothing
+        type: boolean
+        default: false
+    # Callers pass `secrets: inherit`: declaration env entries may name any secret.
+    secrets:
+      GCP_WORKLOAD_IDENTITY_PROVIDER:
+        required: true
+      GCP_DEPLOY_SERVICE_ACCOUNT:
+        required: true
+      GCP_WORKFLOW_SERVICE_ACCOUNT:
+        required: true
+      GCP_SCHEDULER_SERVICE_ACCOUNT:
+        required: true
+
+permissions: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    environment: ${{ inputs.environment }}
+    concurrency:
+      # CI-03, keyed per flow so a multi-flow push never drops a queued flow; drift never blocks a deploy
+      group: ${{ inputs.mode }}-${{ inputs.environment }}-${{ inputs.declaration }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Guard inputs
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          [[ "$ENVIRONMENT" =~ ^(staging|prod)$ && "$MODE" =~ ^(deploy|drift)$ ]] \
+            || { echo "::error::environment must be staging|prod, mode deploy|drift"; exit 1; }
+          # the image tag is github.sha, so a deploy must run from the env branch
+          [[ "$MODE" == drift || "$ENVIRONMENT" == "$GITHUB_REF_NAME" ]] \
+            || { echo "::error::deploy of '$ENVIRONMENT' must run on branch '$ENVIRONMENT', not '$GITHUB_REF_NAME'"; exit 1; }
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # drift is scheduled on the default branch but checks the env branch's declaration
+          ref: ${{ inputs.mode == 'drift' && inputs.environment || github.sha }}
+          persist-credentials: false
+
+      - name: Resolve this workflow's commit
+        id: self
+        run: |
+          # OIDC claim job_workflow_sha = the ba-composite-actions commit the caller pinned
+          TOKEN=$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL" | jq -r .value)
+          PAYLOAD=$(cut -d. -f2 <<<"$TOKEN" | tr '_-' '/+')
+          while (( ${#PAYLOAD} % 4 )); do PAYLOAD+="="; done
+          echo "sha=$(base64 -d <<<"$PAYLOAD" | jq -er .job_workflow_sha)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: BloomAlert/ba-composite-actions
+          ref: ${{ steps.self.outputs.sha }}
+          path: .etl-ci
+          persist-credentials: false
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Read live resources (read-only)
+        env:
+          DECL: ${{ inputs.declaration }}
+          PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION }}
+        run: |
+          yq -o=json '.' "$DECL" > "$RUNNER_TEMP/decl.json"
+          jq -n \
+            --argjson jobs "$(gcloud run jobs list --project="$PROJECT" --region="$REGION" --format=json | jq '[.[] | {name: .metadata.name}]')" \
+            --argjson workflows "$(gcloud workflows list --project="$PROJECT" --location="$REGION" --format=json | jq '[.[] | {name: (.name | split("/") | last)}]')" \
+            --argjson schedulers "$(gcloud scheduler jobs list --project="$PROJECT" --location="$REGION" --format=json | jq '[.[] | {name: (.name | split("/") | last), state}]')" \
+            '{$jobs, $workflows, $schedulers}' > "$RUNNER_TEMP/live.json"
+
+      - name: Render plan (deploy) / report drift (drift)
+        env:
+          MODE: ${{ inputs.mode }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          SHA: ${{ github.sha }}
+          CI_DIR: ${{ github.workspace }}/.etl-ci
+          VARS_JSON: ${{ toJSON(vars) }}
+          SECRETS_JSON: ${{ toJSON(secrets) }}
+        run: |
+          REPO="${GITHUB_REPOSITORY#*/}" python3 .etl-ci/etl/render.py "$MODE" \
+            "$RUNNER_TEMP/decl.json" "$RUNNER_TEMP/live.json" | tee "$RUNNER_TEMP/plan.sh"
+
+      - name: Apply
+        if: inputs.mode == 'deploy' && !inputs.dry_run
+        run: bash "$RUNNER_TEMP/plan.sh"

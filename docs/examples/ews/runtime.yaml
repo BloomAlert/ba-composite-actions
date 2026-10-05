@@ -1,0 +1,34 @@
+# deploy/runtime.yaml in etl-ingestion-ews-gcp (one file per flow; single-flow repo -> no `flow`)
+dockerfile: Dockerfile
+image: main
+job:
+  service_account_var: GCP_JOB_SERVICE_ACCOUNT_EMAIL
+  cpu: 1
+  memory: 2Gi
+  timeout: 600s
+env:
+  - INGESTION_SERVICE
+  - AUTH0_DOMAIN
+  - AUTH0_AUDIENCE
+  - AUTH0_CLIENT_ID
+  - SFTP_HOST
+  - SFTP_USER
+  - SFTP_REMOTE_FOLDER
+  - SFTP_BANNER_TIMEOUT?
+  - REDIS_HOST
+  - REDIS_PORT
+  - REDIS_DATABASE_NAME
+  - REDIS_HOST_TOKEN_CACHE
+  - REDIS_PORT_TOKEN_CACHE
+  - REDIS_PASS_HASH_CACHE_KEY
+  - REDIS_PASS_TOKEN_CACHE_KEY
+  - AUTH0_CLIENT_SECRET_KEY
+  - SFTP_PRIVATE_KEY_KEY
+  - SFTP_PRIVATE_KEY_PASS_KEY
+instances:
+  - name: main
+    schedule: "*/15 * * * *"
+legacy:
+  - etl-ews-ingestion-{env}
+  - workflow-ews-ingestion-{env}
+  - schedule-ews-ingestion-{env}

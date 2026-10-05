@@ -22,3 +22,7 @@ The Google auth action can generate temporary `gha-creds-*.json` files in the
 GitHub workspace. Downstream repositories that build or package workspace
 contents should ignore this pattern in `.gitignore`, `.dockerignore`, and any
 similar artifact include/exclude configuration.
+
+## ETL reusable workflows
+
+`.github/workflows/etl-build.yaml` and `etl-deploy.yaml` are for the `etl-*` fleet; see [docs/etl-workflows.md](docs/etl-workflows.md).

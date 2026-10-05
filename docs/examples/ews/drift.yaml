@@ -1,0 +1,24 @@
+# .github/workflows/drift.yaml in etl-ingestion-ews-gcp (RUN-06)
+name: drift
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  drift:
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [staging, prod]
+    permissions:
+      contents: read
+      id-token: write
+    uses: BloomAlert/ba-composite-actions/.github/workflows/etl-deploy.yaml@<40-hex sha> # v1.0.0
+    with:
+      environment: ${{ matrix.environment }}
+      mode: drift
+    secrets: inherit

@@ -1,0 +1,40 @@
+# deploy/runtime.yaml in etl-ingestion-stormglass-gcp
+dockerfile: Dockerfile
+image: main
+job:
+  service_account_var: GCP_JOB_SERVICE_ACCOUNT_EMAIL
+  cpu: 1
+  memory: 2Gi
+  timeout: 600s
+env:
+  - USERS_SERVICE
+  - AUTH0_DOMAIN
+  - AUTH0_AUDIENCE
+  - AUTH0_CLIENT_ID
+  - REDIS_HOST_TOKEN_CACHE
+  - REDIS_PORT_TOKEN_CACHE
+  - INFLUXDB_HOST
+  - INFLUXDB_ORG
+  - INFLUXDB_BUCKET
+  - GCP_BIGQUERY_RAW_TABLE
+  - REDIS_PASS_TOKEN_CACHE_KEY
+  - INFLUXDB_TOKEN_KEY
+  - STORMGLASS_SECRET_KEY
+  - SATELLITE_AUTH0_CLIENT_SECRET_KEY
+time_zone: America/Santiago
+instances:
+  - {name: wh-01, schedule: "0 13 * * *", args: [--ts-id, WH-01]}
+  - {name: wh-02, schedule: "0 13 * * *", args: [--ts-id, WH-02]}
+  - {name: wad-01, schedule: "0 13 * * *", args: [--ts-id, WAD-01]}
+  - {name: wid-01, schedule: "0 13 * * *", args: [--ts-id, WID-01]}
+  - {name: wis-01, schedule: "0 13 * * *", args: [--ts-id, WIS-01]}
+  - {name: wap-01, schedule: "0 13 * * *", args: [--ts-id, WAP-01]}
+  - {name: swd-01, schedule: "0 13 * * *", args: [--ts-id, SWD-01]}
+  - {name: swh-01, schedule: "0 13 * * *", args: [--ts-id, SWH-01]}
+  - {name: swp-01, schedule: "0 13 * * *", args: [--ts-id, SWP-01]}
+  - {name: wid-03, schedule: "0 13 * * *", args: [--ts-id, WID-03]}
+  - {name: wis-03, schedule: "0 13 * * *", args: [--ts-id, WIS-03]}
+legacy:
+  - etl-stormglass-ingestion-*-{env}
+  - workflow-stormglass-ingestion-*-{env}
+  - schedule-stormglass-ingestion-*-{env}
