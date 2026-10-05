@@ -32,7 +32,7 @@ jobs:
       declaration: deploy/maps.yaml # both tiers share image `map`
     secrets: inherit
 
-  # maps-large first: `maps` pauses every legacy map scheduler, so the large tier's new ones must exist by then
+  # tiers are independent: each pauses only the old resources its instances `replaces`
   deploy-maps-large:
     needs: build
     if: ${{ !cancelled() && needs.build.result != 'failure' }}
@@ -47,8 +47,8 @@ jobs:
     secrets: inherit
 
   deploy-maps:
-    needs: deploy-maps-large
-    if: ${{ !cancelled() && needs.deploy-maps-large.result == 'success' }}
+    needs: build
+    if: ${{ !cancelled() && needs.build.result != 'failure' }}
     permissions:
       contents: read
       id-token: write

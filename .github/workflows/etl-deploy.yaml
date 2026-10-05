@@ -1,5 +1,5 @@
 # Reusable ETL deploy + nightly drift check (docs/etl-workflows.md).
-# Reconciles one flow: 1 Cloud Run job + 1 Workflow + 1 Scheduler per instance (RUN-01..06).
+# Reconciles one flow: 1 Cloud Run job + 1 Workflow + 1 Scheduler per instance (RUN-01..06, ALERT-01..03).
 name: etl-deploy
 
 on:
@@ -18,7 +18,7 @@ on:
         type: string
         default: deploy
       dry_run:
-        description: Print every gcloud command and the orphan list; execute nothing
+        description: Print every gcloud command (values redacted) and the orphan list; execute nothing
         type: boolean
         default: false
     # Callers pass `secrets: inherit`: declaration env entries may name any secret.
@@ -26,22 +26,25 @@ on:
       GCP_WORKLOAD_IDENTITY_PROVIDER:
         required: true
       GCP_DEPLOY_SERVICE_ACCOUNT:
-        required: true
+        required: false # deploy mode
+      GCP_DRIFT_SERVICE_ACCOUNT:
+        required: false # drift mode: a read-only SA
       GCP_WORKFLOW_SERVICE_ACCOUNT:
-        required: true
+        required: false
       GCP_SCHEDULER_SERVICE_ACCOUNT:
-        required: true
+        required: false
 
 permissions: {}
 
 jobs:
   deploy:
+    if: inputs.mode == 'deploy'
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     environment: ${{ inputs.environment }}
     concurrency:
-      # CI-03, keyed per flow so a multi-flow push never drops a queued flow; drift never blocks a deploy
-      group: ${{ inputs.mode }}-${{ inputs.environment }}-${{ inputs.declaration }}
+      # CI-03, keyed per flow so a multi-flow push never drops a queued flow
+      group: deploy-${{ inputs.environment }}-${{ inputs.declaration }}
       cancel-in-progress: false
     permissions:
       contents: read
@@ -50,28 +53,22 @@ jobs:
       - name: Guard inputs
         env:
           ENVIRONMENT: ${{ inputs.environment }}
-          MODE: ${{ inputs.mode }}
         run: |
-          [[ "$ENVIRONMENT" =~ ^(staging|prod)$ && "$MODE" =~ ^(deploy|drift)$ ]] \
-            || { echo "::error::environment must be staging|prod, mode deploy|drift"; exit 1; }
           # the image tag is github.sha, so a deploy must run from the env branch
-          [[ "$MODE" == drift || "$ENVIRONMENT" == "$GITHUB_REF_NAME" ]] \
-            || { echo "::error::deploy of '$ENVIRONMENT' must run on branch '$ENVIRONMENT', not '$GITHUB_REF_NAME'"; exit 1; }
+          [[ "$ENVIRONMENT" =~ ^(staging|prod)$ && "$ENVIRONMENT" == "$GITHUB_REF_NAME" ]] \
+            || { echo "::error::deploy of '$ENVIRONMENT' must run on branch staging|prod = environment, not '$GITHUB_REF_NAME'"; exit 1; }
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # drift is scheduled on the default branch but checks the env branch's declaration
-          ref: ${{ inputs.mode == 'drift' && inputs.environment || github.sha }}
           persist-credentials: false
 
       - name: Resolve this workflow's commit
         id: self
         run: |
           # OIDC claim job_workflow_sha = the ba-composite-actions commit the caller pinned
-          TOKEN=$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL" | jq -r .value)
-          PAYLOAD=$(cut -d. -f2 <<<"$TOKEN" | tr '_-' '/+')
-          while (( ${#PAYLOAD} % 4 )); do PAYLOAD+="="; done
-          echo "sha=$(base64 -d <<<"$PAYLOAD" | jq -er .job_workflow_sha)" >> "$GITHUB_OUTPUT"
+          curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL" \
+            | jq -r '.value | split(".")[1] | gsub("-"; "+") | gsub("_"; "/") | @base64d | fromjson
+                     | "sha=\(.job_workflow_sha)"' >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -98,18 +95,87 @@ jobs:
           yq -o=json '.' "$DECL" > "$RUNNER_TEMP/decl.json"
           .etl-ci/etl/live.sh "$PROJECT" "$REGION" > "$RUNNER_TEMP/live.json"
 
-      - name: Render plan (deploy) / report drift (drift)
+      - name: Render plan
         env:
-          MODE: ${{ inputs.mode }}
           ENVIRONMENT: ${{ inputs.environment }}
           SHA: ${{ github.sha }}
           CI_DIR: ${{ github.workspace }}/.etl-ci
           VARS_JSON: ${{ toJSON(vars) }}
           SECRETS_JSON: ${{ toJSON(secrets) }}
         run: |
-          REPO="${GITHUB_REPOSITORY#*/}" python3 .etl-ci/etl/render.py "$MODE" \
+          # values go to $ETL_OUT files that are never printed; plan.sh holds names and $S_* references only
+          ETL_OUT="$RUNNER_TEMP/etl" REPO="${GITHUB_REPOSITORY#*/}" python3 .etl-ci/etl/render.py deploy \
             "$RUNNER_TEMP/decl.json" "$RUNNER_TEMP/live.json" | tee "$RUNNER_TEMP/plan.sh"
 
       - name: Apply
-        if: inputs.mode == 'deploy' && !inputs.dry_run
-        run: bash "$RUNNER_TEMP/plan.sh"
+        if: ${{ !inputs.dry_run }}
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # no silent rollback: a re-run of an older commit must not overwrite a newer deploy
+          HEAD=$(gh api "repos/$GITHUB_REPOSITORY/commits/$ENVIRONMENT" --jq .sha)
+          [[ "$HEAD" == "$GITHUB_SHA" ]] \
+            || { echo "::error::$ENVIRONMENT is at $HEAD, this run is $GITHUB_SHA; refusing to deploy an older commit"; exit 1; }
+          ETL_OUT="$RUNNER_TEMP/etl" bash "$RUNNER_TEMP/plan.sh"
+
+  # RUN-06: names only, no environment (repo-level vars), read-only SA; never writes
+  drift:
+    if: inputs.mode == 'drift'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    concurrency:
+      group: drift-${{ inputs.environment }}-${{ inputs.declaration }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Guard inputs
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          DRIFT_SA: ${{ secrets.GCP_DRIFT_SERVICE_ACCOUNT }}
+        run: |
+          [[ "$ENVIRONMENT" =~ ^(staging|prod)$ ]] || { echo "::error::environment must be staging|prod"; exit 1; }
+          [[ -n "$DRIFT_SA" ]] || { echo "::error::drift needs secret GCP_DRIFT_SERVICE_ACCOUNT (read-only SA)"; exit 1; }
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # drift is scheduled on the default branch but checks the env branch's declaration
+          ref: ${{ inputs.environment }}
+          persist-credentials: false
+
+      - name: Resolve this workflow's commit
+        id: self
+        run: |
+          curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL" \
+            | jq -r '.value | split(".")[1] | gsub("-"; "+") | gsub("_"; "/") | @base64d | fromjson
+                     | "sha=\(.job_workflow_sha)"' >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: BloomAlert/ba-composite-actions
+          ref: ${{ steps.self.outputs.sha }}
+          path: .etl-ci
+          persist-credentials: false
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DRIFT_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Report drift
+        env:
+          DECL: ${{ inputs.declaration }}
+          PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          VARS_JSON: ${{ toJSON(vars) }}
+        run: |
+          yq -o=json '.' "$DECL" > "$RUNNER_TEMP/decl.json"
+          .etl-ci/etl/live.sh "$PROJECT" "$REGION" > "$RUNNER_TEMP/live.json"
+          REPO="${GITHUB_REPOSITORY#*/}" python3 .etl-ci/etl/render.py drift "$RUNNER_TEMP/decl.json" "$RUNNER_TEMP/live.json"

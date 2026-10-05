@@ -14,11 +14,28 @@ env:
 time_zone: America/Santiago
 retry: {count: 16, backoff_seconds: 1800}   # was map_retry in every scheduler payload
 next: etl-ingestion-cmems-timeseries          # was trigger_timeseries; gets the same args/labels
-instances:
-  - {name: chl-02, schedule: "15 8 * * *", args: [--ts-id, CHL-02, --publish-arrival, --source, nrt]}
-  - {name: chl-02-middle-east, schedule: "0 7 * * *", args: [--ts-id, CHL-02, --region, middle-east, --source, auto]}
-  - {name: thetao-01, schedule: "20 8 * * *", args: [--ts-id, THETAO-01, --publish-arrival, --source, nrt]}
-  - {name: thetao-01-middle-east, schedule: "0 7 * * *", args: [--ts-id, THETAO-01, --region, middle-east, --source, auto]}
-legacy:                          # only this tier's old resources; deploy this tier before `maps`
-  - "*-map-ingestion-chl-02-*{env}"
-  - "*-map-ingestion-thetao-01-*{env}"
+instances:  # replaces: the exact old resources this instance supersedes (RUN-04)
+  - name: chl-02
+    schedule: "15 8 * * *"
+    args: [--ts-id, CHL-02, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-chl-02-{env}
+      - workflow-map-ingestion-chl-02-{env}
+      - schedule-map-ingestion-chl-02-{env}
+  - name: chl-02-middle-east
+    schedule: "0 7 * * *"
+    args: [--ts-id, CHL-02, --region, middle-east, --source, auto]
+    replaces:
+      - schedule-map-ingestion-chl-02-middle-east-{env}
+  - name: thetao-01
+    schedule: "20 8 * * *"
+    args: [--ts-id, THETAO-01, --publish-arrival, --source, nrt]
+    replaces:
+      - etl-map-ingestion-thetao-01-{env}
+      - workflow-map-ingestion-thetao-01-{env}
+      - schedule-map-ingestion-thetao-01-{env}
+  - name: thetao-01-middle-east
+    schedule: "0 7 * * *"
+    args: [--ts-id, THETAO-01, --region, middle-east, --source, auto]
+    replaces:
+      - schedule-map-ingestion-thetao-01-middle-east-{env}

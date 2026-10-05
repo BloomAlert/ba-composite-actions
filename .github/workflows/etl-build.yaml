@@ -1,4 +1,5 @@
 # Reusable ETL build (docs/etl-workflows.md). Builds one flow's image, pushes :<github.sha>.
+# Unsupported: private package indexes at build time (e.g. bloompy from a GAR `index_url`); no fleet ETL uses one.
 name: etl-build
 
 on:
@@ -83,9 +84,21 @@ jobs:
           REGION: ${{ vars.GCP_REGION }}
         run: |
           gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
-          gcloud artifacts repositories describe "$AR_REPO" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 \
-            || gcloud artifacts repositories create "$AR_REPO" --repository-format=docker \
-                 --location="$REGION" --project="$PROJECT" --description="Docker images for ${AR_REPO}"
+          if ! gcloud artifacts repositories describe "$AR_REPO" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1; then
+            gcloud artifacts repositories create "$AR_REPO" --repository-format=docker \
+              --location="$REGION" --project="$PROJECT" --description="Docker images for ${AR_REPO}"
+            # RUN-05, set once at creation; keep in sync with etl/ar-cleanup-policy.json (test_render.py checks).
+            # Existing repos: etl/ar_cleanup.py (one-off, dry-run by default).
+            cat > "$RUNNER_TEMP/ar-policy.json" <<'JSON'
+          [
+            {"name": "keep-last-10", "action": {"type": "Keep"}, "mostRecentVersions": {"keepCount": 10}},
+            {"name": "delete-tagged", "action": {"type": "Delete"}, "condition": {"tagState": "tagged"}},
+            {"name": "delete-untagged-7d", "action": {"type": "Delete"}, "condition": {"tagState": "untagged", "olderThan": "7d"}}
+          ]
+          JSON
+            gcloud artifacts repositories set-cleanup-policies "$AR_REPO" --location="$REGION" --project="$PROJECT" \
+              --policy="$RUNNER_TEMP/ar-policy.json" --no-dry-run
+          fi
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 

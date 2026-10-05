@@ -22,19 +22,81 @@ env:
   - STORMGLASS_SECRET_KEY
   - SATELLITE_AUTH0_CLIENT_SECRET_KEY
 time_zone: America/Santiago
-instances:
-  - {name: wh-01, schedule: "0 13 * * *", args: [--ts-id, WH-01]}
-  - {name: wh-02, schedule: "0 13 * * *", args: [--ts-id, WH-02]}
-  - {name: wad-01, schedule: "0 13 * * *", args: [--ts-id, WAD-01]}
-  - {name: wid-01, schedule: "0 13 * * *", args: [--ts-id, WID-01]}
-  - {name: wis-01, schedule: "0 13 * * *", args: [--ts-id, WIS-01]}
-  - {name: wap-01, schedule: "0 13 * * *", args: [--ts-id, WAP-01]}
-  - {name: swd-01, schedule: "0 13 * * *", args: [--ts-id, SWD-01]}
-  - {name: swh-01, schedule: "0 13 * * *", args: [--ts-id, SWH-01]}
-  - {name: swp-01, schedule: "0 13 * * *", args: [--ts-id, SWP-01]}
-  - {name: wid-03, schedule: "0 13 * * *", args: [--ts-id, WID-03]}
-  - {name: wis-03, schedule: "0 13 * * *", args: [--ts-id, WIS-03]}
-legacy:
-  - etl-stormglass-ingestion-*-{env}
-  - workflow-stormglass-ingestion-*-{env}
-  - schedule-stormglass-ingestion-*-{env}
+instances:  # replaces: the exact per-instance resources this instance supersedes (RUN-04)
+  - name: wh-01
+    schedule: "0 13 * * *"
+    args: [--ts-id, WH-01]
+    replaces:
+      - etl-stormglass-ingestion-wh-01-{env}
+      - workflow-stormglass-ingestion-wh-01-{env}
+      - schedule-stormglass-ingestion-wh-01-{env}
+  - name: wh-02
+    schedule: "0 13 * * *"
+    args: [--ts-id, WH-02]
+    replaces:
+      - etl-stormglass-ingestion-wh-02-{env}
+      - workflow-stormglass-ingestion-wh-02-{env}
+      - schedule-stormglass-ingestion-wh-02-{env}
+  - name: wad-01
+    schedule: "0 13 * * *"
+    args: [--ts-id, WAD-01]
+    replaces:
+      - etl-stormglass-ingestion-wad-01-{env}
+      - workflow-stormglass-ingestion-wad-01-{env}
+      - schedule-stormglass-ingestion-wad-01-{env}
+  - name: wid-01
+    schedule: "0 13 * * *"
+    args: [--ts-id, WID-01]
+    replaces:
+      - etl-stormglass-ingestion-wid-01-{env}
+      - workflow-stormglass-ingestion-wid-01-{env}
+      - schedule-stormglass-ingestion-wid-01-{env}
+  - name: wis-01
+    schedule: "0 13 * * *"
+    args: [--ts-id, WIS-01]
+    replaces:
+      - etl-stormglass-ingestion-wis-01-{env}
+      - workflow-stormglass-ingestion-wis-01-{env}
+      - schedule-stormglass-ingestion-wis-01-{env}
+  - name: wap-01
+    schedule: "0 13 * * *"
+    args: [--ts-id, WAP-01]
+    replaces:
+      - etl-stormglass-ingestion-wap-01-{env}
+      - workflow-stormglass-ingestion-wap-01-{env}
+      - schedule-stormglass-ingestion-wap-01-{env}
+  - name: swd-01
+    schedule: "0 13 * * *"
+    args: [--ts-id, SWD-01]
+    replaces:
+      - etl-stormglass-ingestion-swd-01-{env}
+      - workflow-stormglass-ingestion-swd-01-{env}
+      - schedule-stormglass-ingestion-swd-01-{env}
+  - name: swh-01
+    schedule: "0 13 * * *"
+    args: [--ts-id, SWH-01]
+    replaces:
+      - etl-stormglass-ingestion-swh-01-{env}
+      - workflow-stormglass-ingestion-swh-01-{env}
+      - schedule-stormglass-ingestion-swh-01-{env}
+  - name: swp-01
+    schedule: "0 13 * * *"
+    args: [--ts-id, SWP-01]
+    replaces:
+      - etl-stormglass-ingestion-swp-01-{env}
+      - workflow-stormglass-ingestion-swp-01-{env}
+      - schedule-stormglass-ingestion-swp-01-{env}
+  - name: wid-03
+    schedule: "0 13 * * *"
+    args: [--ts-id, WID-03]
+    replaces:
+      - etl-stormglass-ingestion-wid-03-{env}
+      - workflow-stormglass-ingestion-wid-03-{env}
+      - schedule-stormglass-ingestion-wid-03-{env}
+  - name: wis-03
+    schedule: "0 13 * * *"
+    args: [--ts-id, WIS-03]
+    replaces:
+      - etl-stormglass-ingestion-wis-03-{env}
+      - workflow-stormglass-ingestion-wis-03-{env}
+      - schedule-stormglass-ingestion-wis-03-{env}

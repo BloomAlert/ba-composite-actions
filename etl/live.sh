@@ -9,6 +9,8 @@ jq -n \
     | jq '[.[] | {name: (.name | split("/") | last)}]')" \
   --argjson schedulers "$(gcloud scheduler jobs list --project="$P" --location="$R" --format=json \
     | jq '[.[] | {name: (.name | split("/") | last), state, uri: .httpTarget.uri}]')" \
-  --argjson metrics "$(gcloud logging metrics list --project="$P" --format=json | jq '[.[] | {name}]')" \
-  --argjson policies "$(gcloud monitoring policies list --project="$P" --format=json | jq '[.[] | {name, displayName}]')" \
+  --argjson metrics "$(gcloud logging metrics list --project="$P" --filter='name:etl-heartbeat-' --format=json \
+    | jq '[.[] | {name}]')" \
+  --argjson policies "$(gcloud monitoring policies list --project="$P" --filter='displayName:etl-heartbeat-' --format=json \
+    | jq '[.[] | {name, displayName}]')" \
   '{$jobs, $workflows, $schedulers, $metrics, $policies}'

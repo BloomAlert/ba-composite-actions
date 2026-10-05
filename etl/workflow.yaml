@@ -1,5 +1,5 @@
-# Generic Cloud Workflow, one per flow (RUN-01). etl-deploy sets its env:
-#   GCP_PROJECT_ID, GCP_REGION, ENVIRONMENT, JOB_NAME, NOTIFY_URL,
+# Generic Cloud Workflow, one per flow (RUN-01). etl-deploy sets its env from an env-vars file:
+#   GCP_PROJECT_ID, GCP_REGION, ENVIRONMENT, JOB_NAME, JOB_TIMEOUT_SECONDS, NOTIFY_URL,
 #   RETRY_COUNT (0 = no retry), RETRY_BACKOFF_SECONDS, NEXT_WORKFLOW ("none" = no chaining).
 # Input: {"args": [...], "labels": {...}}. Manual run:
 #   gcloud workflows run <name> --data='{"args":["--start-dt","2026-10-01"]}' --labels=instance=manual
@@ -9,21 +9,15 @@ main:
     - init:
         assign:
           - final_args_list: ${default(map.get(input, "args"), [])}
-          - labels: ${default(map.get(input, "labels"), null)}
-          - gcp_project_id: ${sys.get_env("GCP_PROJECT_ID")}
-          - gcp_region: ${sys.get_env("GCP_REGION")}
-          - environment: ${sys.get_env("ENVIRONMENT")}
+          - labels: ${default(map.get(input, "labels"), {})}
+          - project: ${sys.get_env("GCP_PROJECT_ID")}
+          - region: ${sys.get_env("GCP_REGION")}
           - job_name: ${sys.get_env("JOB_NAME")}
           - max_attempts: ${int(sys.get_env("RETRY_COUNT")) + 1}
           - backoff: ${int(sys.get_env("RETRY_BACKOFF_SECONDS"))}
           - next_workflow: ${sys.get_env("NEXT_WORKFLOW")}
           - err: null
-
-    - default_labels:
-        switch:
-          - condition: ${labels == null}
-            assign:
-              - labels: {}
+          - job_op: null
 
     - attempts:
         for:
@@ -39,12 +33,13 @@ main:
                 try:
                   call: googleapis.run.v2.projects.locations.jobs.run
                   args:
-                    name: ${"projects/" + gcp_project_id + "/locations/" + gcp_region + "/jobs/" + job_name}
+                    name: ${"projects/" + project + "/locations/" + region + "/jobs/" + job_name}
                     body:
                       overrides:
                         containerOverrides:
                           - args: ${final_args_list}
                     connector_params:
+                      timeout: ${int(sys.get_env("JOB_TIMEOUT_SECONDS")) + 600}
                       polling_policy:
                         initial_delay: 10.0
                         multiplier: 1.0
@@ -60,18 +55,17 @@ main:
                 switch:
                   - condition: ${err == null}
                     next: break
-            - notify:
-                call: notify_failure
+            - notify_failure:
+                call: notify
                 args:
-                  err: ${err}
-                  attempt: ${attempt}
-                  max_attempts: ${max_attempts}
+                  event_type: job_failed
+                  # connectors raise OperationError carrying the failed LRO, whose metadata is the Execution
+                  execution: ${map.get(err, ["operation", "metadata", "name"])}
+                  summary: ${default(map.get(err, "message"), json.encode_to_string(err))}
                   labels: ${labels}
-                  final_args_list: ${final_args_list}
-                  gcp_project_id: ${gcp_project_id}
-                  gcp_region: ${gcp_region}
-                  environment: ${environment}
-                  job_name: ${job_name}
+                  extra:
+                    attempt: ${string(attempt) + "/" + string(max_attempts)}
+                    args: ${json.encode_to_string(final_args_list)}
             - wait_before_retry:
                 switch:
                   - condition: ${attempt < max_attempts}
@@ -88,6 +82,17 @@ main:
               - reraise:
                   raise: ${err}
 
+    # ALERT-02: ba-ops-notify uses this for "recovered" replies and the daily ok count
+    - notify_success:
+        call: notify
+        args:
+          event_type: job_succeeded
+          execution: ${map.get(job_op, "name")}
+          summary: ${job_name + " succeeded"}
+          labels: ${labels}
+          extra:
+            args: ${json.encode_to_string(final_args_list)}
+
     - start_next:
         switch:
           - condition: ${next_workflow != "none"}
@@ -95,7 +100,7 @@ main:
               - create_next_execution:
                   call: googleapis.workflowexecutions.v1.projects.locations.workflows.executions.create
                   args:
-                    parent: ${"projects/" + gcp_project_id + "/locations/" + gcp_region + "/workflows/" + next_workflow}
+                    parent: ${"projects/" + project + "/locations/" + region + "/workflows/" + next_workflow}
                     body:
                       argument: ${json.encode_to_string(input)}
                       labels: ${labels}
@@ -103,18 +108,19 @@ main:
     - done:
         return: ${job_name + " finished"}
 
-# ALERT-01: one typed ba-ops-notify event per failed attempt, with exit code, execution, labels and logs link.
-notify_failure:
-  params: [err, attempt, max_attempts, labels, final_args_list, gcp_project_id, gcp_region, environment, job_name]
+# One typed v2 ba-ops-notify event (ALERT-01/02). Fail-soft: a notifier error is logged, never raised.
+notify:
+  params: [event_type, execution, summary, labels, extra]
   steps:
     - init:
         assign:
-          # connectors raise OperationError with the failed LRO, whose metadata is the Execution
-          - execution: ${map.get(err, ["operation", "metadata", "name"])}
+          - project: ${sys.get_env("GCP_PROJECT_ID")}
+          - region: ${sys.get_env("GCP_REGION")}
+          - job_name: ${sys.get_env("JOB_NAME")}
           - exit_code: "unknown"
           - console: https://console.cloud.google.com/run/jobs/
-          - log_uri: ${console + "details/" + gcp_region + "/" + job_name + "/logs?project=" + gcp_project_id}
-          - context: {}
+          - log_uri: ${console + "details/" + region + "/" + job_name + "/logs?project=" + project}
+          - context: ${labels}
     - read_exit_code:
         switch:
           - condition: ${execution != null}
@@ -122,49 +128,55 @@ notify_failure:
               - execution_link:
                   assign:
                     - parts: ${text.split(execution, "/")}
-                    - log_uri: ${console + "executions/details/" + gcp_region + "/" + parts[len(parts) - 1] + "/logs?project=" + gcp_project_id}
-              - tasks:
+                    - log_uri: ${console + "executions/details/" + region + "/" + parts[len(parts) - 1] + "/logs?project=" + project}
+              - exit_code_lookup:
                   try:
-                    call: googleapis.run.v2.projects.locations.jobs.executions.tasks.list
-                    args:
-                      parent: ${execution}
-                    result: task_page
+                    steps:
+                      - list_tasks:
+                          call: googleapis.run.v2.projects.locations.jobs.executions.tasks.list
+                          args:
+                            parent: ${execution}
+                          result: task_page
+                      - first_task_code:
+                          assign:
+                            - exit_code: ${string(task_page.tasks[0].lastAttemptResult.exitCode)}
                   except:
                     as: ignored
                     steps:
-                      - no_tasks:
+                      - keep_unknown:
                           assign:
-                            - task_page: {}
-              - first_task:
-                  assign:
-                    - tasks: ${default(map.get(task_page, "tasks"), [])}
-              - first_task_code:
-                  assign:
-                    - code: null
-              - read_first_task:
-                  switch:
-                    - condition: ${len(tasks) > 0}
-                      assign:
-                        - code: ${map.get(tasks[0], ["lastAttemptResult", "exitCode"])}
-              - exit_code_of_first_task:
-                  switch:
-                    - condition: ${code != null}
-                      assign:
-                        - exit_code: ${string(code)}
-    - build_context:
+                            - exit_code: "unknown"
+    # APP-05 exit codes
+    - classify:
+        switch:
+          - condition: ${exit_code == "0"}
+            assign:
+              - exit_class: ok
+          - condition: ${exit_code == "1"}
+            assign:
+              - exit_class: bug
+          - condition: ${exit_code == "2"}
+            assign:
+              - exit_class: config
+          - condition: ${exit_code == "3"}
+            assign:
+              - exit_class: transient source
+          - condition: true
+            assign:
+              - exit_class: unknown
+    - add_context:
         for:
           value: key
-          in: ${keys(labels)}
+          in: ${keys(extra)}
           steps:
-            - copy_label:
+            - copy:
                 assign:
-                  - context[key]: ${labels[key]}
-    - add_context:
+                  - context[key]: ${extra[key]}
+    - add_fixed_context:
         assign:
           - context["exit_code"]: ${exit_code}
+          - context["exit_class"]: ${exit_class}
           - context["execution"]: ${default(execution, "not started")}
-          - context["attempt"]: ${string(attempt) + "/" + string(max_attempts)}
-          - context["args"]: ${json.encode_to_string(final_args_list)}
     - post:
         try:
           call: http.post
@@ -176,20 +188,19 @@ notify_failure:
               schema_version: 2
               source:
                 job_name: ${job_name}
-                gcp_project_id: ${gcp_project_id}
-                gcp_region: ${gcp_region}
-                environment: ${environment}
+                gcp_project_id: ${project}
+                gcp_region: ${region}
+                environment: ${sys.get_env("ENVIRONMENT")}
               event:
-                event_type: job_failed
-                severity: ERROR
-                title: ${job_name + " failed (exit " + exit_code + ")"}
-                summary: ${default(map.get(err, "message"), json.encode_to_string(err))}
+                event_type: ${event_type}
+                severity: ${if(event_type == "job_failed", "ERROR", "INFO")}
+                title: ${job_name + if(event_type == "job_failed", " failed (exit " + exit_code + ", " + exit_class + ")", " succeeded")}
+                summary: ${summary}
                 context: ${context}
                 log_uri: ${log_uri}
         except:
           as: notify_error
           steps:
-            # a notifier outage must not hide the job failure, which is still raised by main
             - log_notify_error:
                 call: sys.log
                 args:
