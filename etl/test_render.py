@@ -19,7 +19,7 @@ NASTY = "p@ss'w,o\"rd"
 VARS = {"GCP_PROJECT_ID": P, "GCP_REGION": R, "AUTH0_DOMAIN": NASTY,
         "ETL_ALERT_CHANNEL": f"projects/{P}/notificationChannels/1"}
 SECRETS = {"GCP_WORKFLOW_SERVICE_ACCOUNT": "wf@sa", "GCP_SCHEDULER_SERVICE_ACCOUNT": "sch@sa",
-           "ETL_OPS_NOTIFY_URL": "https://notify.example", "STORMGLASS_SECRET_KEY": "s3cr3t-value"}
+           "ETL_OPS_NOTIFY_URL": "https://notify.example"}
 
 
 def wf_uri(wf):
@@ -27,7 +27,8 @@ def wf_uri(wf):
 
 
 def synthetic_live(env="staging"):
-    live = {"jobs": [], "workflows": [], "schedulers": [], "metrics": [], "policies": []}
+    live = {"jobs": [], "workflows": [], "schedulers": [], "metrics": [], "policies": [],
+            "secrets": ["slack-bot-token"]}  # Secret Manager secrets that exist (live.sh describes them)
 
     def legacy(job, wf, sched, repo):
         live["jobs"].append({"name": job, "image": f"{R}-docker.pkg.dev/{P}/{repo}-{env}/main:old"})
@@ -53,7 +54,8 @@ def tmp(content):
     return f.name
 
 
-def render(example, decl="runtime.yaml", mode="deploy", env="staging", live=None, drop=(), patch=None):
+def render(example, decl="runtime.yaml", mode="deploy", env="staging", live=None, drop=(), patch=None,
+           secrets=SECRETS):
     d = json.loads(subprocess.run(["yq", "-o=json", ".", "-"], check=True, capture_output=True, text=True,
                                   stdin=open(os.path.join(EXAMPLES, example, decl))).stdout)
     if patch:
@@ -67,7 +69,7 @@ def render(example, decl="runtime.yaml", mode="deploy", env="staging", live=None
     for k in drop:
         vars_.pop(k, None)
     out = tempfile.mkdtemp()
-    e = dict(os.environ, VARS_JSON=json.dumps(vars_), SECRETS_JSON=json.dumps(SECRETS), ENVIRONMENT=env,
+    e = dict(os.environ, VARS_JSON=json.dumps(vars_), SECRETS_JSON=json.dumps(secrets), ENVIRONMENT=env,
              REPO=REPOS[example], SHA="abc123", CI_DIR="/ci", ETL_OUT=out)
     r = subprocess.run([sys.executable, os.path.join(HERE, "render.py"), mode, tmp(json.dumps(d)),
                         tmp(json.dumps(live or synthetic_live(env)))], env=e, capture_output=True, text=True)
@@ -108,13 +110,40 @@ def main():
     for secret in [*SECRETS.values(), NASTY]:  # (2) no value from env files/secrets in the plan
         assert secret not in sg, secret
     assert '--service-account="$S_GCP_WORKFLOW_SERVICE_ACCOUNT"' in sg
-    assert "s3cr3t-value" in open(os.path.join(r.out, "job-env.yaml")).read()
     pauses, metric = lines(sg, "gcloud scheduler jobs pause "), lines(sg, "gcloud logging metrics")
     creates = lines(sg, "gcloud scheduler jobs create http ")
     assert len(pauses) == 11 and max(creates) < min(pauses) and max(pauses) < min(metric)  # (4) ordering
     assert "echo '  schedulers/etl-ingestion-stormglass-old-01-staging'" in sg  # owned by target
     assert "-prod" not in sg.replace("--project", ""), "staging plan must not touch prod"
     assert '\\"args\\": [\\"--ts-id\\", \\"WH-01\\"]' in sg and '"labels": {"instance": "wh-01"}' in sg
+
+    assert "--clear-secrets" in sg  # no `secrets:` -> the job keeps no stale secret refs
+
+    # env reads vars only: a name that exists only as a GitHub secret fails, value never rendered
+    leak = render("stormglass", drop=("STORMGLASS_SECRET_KEY",),
+                  secrets={**SECRETS, "STORMGLASS_SECRET_KEY": "s3cr3t-value"})
+    assert leak.returncode != 0 and "is a GitHub secret" in leak.stderr, leak.stderr
+    assert not os.path.exists(os.path.join(leak.out, "job-env.yaml"))
+    optional = render("stormglass", drop=("STORMGLASS_SECRET_KEY",), secrets={**SECRETS, "STORMGLASS_SECRET_KEY": "x"},
+                      patch=lambda d: d.update(env=[e + "?" if e == "STORMGLASS_SECRET_KEY" else e for e in d["env"]]))
+    assert optional.returncode != 0 and "is a GitHub secret" in optional.stderr  # optional doesn't drop it silently
+
+    # `secrets:` -> --set-secrets refs to existing Secret Manager secrets, value never in env files
+    sm = render("stormglass", patch=lambda d: d.update(secrets={"SLACK_BOT_TOKEN": "slack-bot-token",
+                                                                "PINNED": "slack-bot-token:3"}))
+    assert "--set-secrets=SLACK_BOT_TOKEN=slack-bot-token:latest,PINNED=slack-bot-token:3" in sm.stdout, sm.stderr
+    assert "--clear-secrets" not in sm.stdout
+    assert "SLACK_BOT_TOKEN" not in json.load(open(os.path.join(sm.out, "job-env.yaml")))
+    per_env = render("stormglass", patch=lambda d: d.update(secrets={"T": "slack-bot-{env}"}),
+                     live={**synthetic_live(), "secrets": ["slack-bot-staging"]})
+    assert "--set-secrets=T=slack-bot-staging:latest" in per_env.stdout, per_env.stderr
+    assert "not a valid env var name" in render("stormglass", patch=lambda d: d.update(
+        secrets={"A=x:1,B": "slack-bot-token"})).stderr
+    missing = render("stormglass", patch=lambda d: d.update(secrets={"X": "not-in-sm"}))
+    assert missing.returncode != 0 and "not-in-sm not found" in missing.stderr, missing.stderr
+    assert "also set as a plain env" in render("stormglass", patch=lambda d: d.update(
+        secrets={"AUTH0_DOMAIN": "slack-bot-token"})).stderr
+    assert "bad reference" in render("stormglass", patch=lambda d: d.update(secrets={"X": "slack-bot-token:v1"})).stderr
 
     def foreign(d):  # (5) a replaced scheduler that targets someone else's workflow
         d["instances"][0]["replaces"] = ["schedule-etl-well-level-ews-{env}"]

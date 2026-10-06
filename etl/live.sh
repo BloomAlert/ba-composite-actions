@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
-# Read-only snapshot of what render.py reconciles against. Usage: live.sh PROJECT REGION > live.json
+# Read-only snapshot of what render.py reconciles against. Usage: live.sh PROJECT REGION [DECL_JSON] > live.json
+# With DECL_JSON, `secrets` lists which of its Secret Manager secrets exist (describe only, never values).
 set -euo pipefail
 P="$1" R="$2"
+secrets='[]'
+if [[ -n "${3:-}" ]]; then
+  # malformed `secrets:` -> empty here; render.py reports it
+  secrets=$(jq -r --arg env "${ENVIRONMENT:-}" '.secrets | objects | .[] | tostring | gsub("\\{env\\}"; $env)
+      | split(":")[0]' "$3" | sort -u | while read -r s; do
+    if gcloud secrets describe "$s" --project="$P" --format='value(name)' </dev/null >/dev/null; then echo "$s"; fi
+  done | jq -Rn '[inputs]')
+fi
 jq -n \
   --argjson jobs "$(gcloud run jobs list --project="$P" --region="$R" --format=json \
     | jq '[.[] | {name: .metadata.name, image: .spec.template.spec.template.spec.containers[0].image}]')" \
@@ -13,4 +22,5 @@ jq -n \
     | jq '[.[] | {name}]')" \
   --argjson policies "$(gcloud monitoring policies list --project="$P" --filter='displayName:etl-heartbeat-' --format=json \
     | jq '[.[] | {name, displayName}]')" \
-  '{$jobs, $workflows, $schedulers, $metrics, $policies}'
+  --argjson secrets "$secrets" \
+  '{$jobs, $workflows, $schedulers, $metrics, $policies, $secrets}'
