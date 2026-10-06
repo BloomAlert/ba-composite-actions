@@ -37,8 +37,8 @@ def deployed(live, ar_path):
     return tags, digests
 
 
-def to_delete(images, tags_kept, digests_kept, now):
-    """Mirror of the policy: keep newest 10 per package + deployed; delete other tagged, untagged > 7d."""
+def to_delete(images, tags_kept, digests_kept, now, keep_n):
+    """Mirror of the policy: keep newest keep_n per package + deployed; delete other tagged, untagged > 7d."""
     out, by_pkg = [], {}
     for im in images:
         by_pkg.setdefault(im["package"], []).append(im)
@@ -52,7 +52,7 @@ def to_delete(images, tags_kept, digests_kept, now):
     for versions in by_pkg.values():
         versions.sort(key=lambda v: v["createTime"], reverse=True)
         kept = {v["version"] for i, v in enumerate(versions)
-                if i < 10 or v["version"] in digests_kept or set(tags_of(v)) & tags_kept}
+                if i < keep_n or v["version"] in digests_kept or set(tags_of(v)) & tags_kept}
         kept_times = [ts(v) for v in versions if v["version"] in kept]
         for v in versions:
             if v["version"] in kept:
@@ -75,6 +75,7 @@ def main():
         {"image": s["spec"]["template"]["spec"]["containers"][0]["image"]}
         for s in gcloud("run", "services", "list", f"--project={project}", f"--region={region}"))
     base = json.load(open(os.path.join(HERE, "ar-cleanup-policy.json")))
+    keep_n = next(r["mostRecentVersions"]["keepCount"] for r in base if "mostRecentVersions" in r)
     now, total = datetime.now(timezone.utc), 0
     for repo in gcloud("artifacts", "repositories", "list", f"--project={project}", f"--location={region}"):
         name = repo["name"].split("/")[-1]
@@ -83,7 +84,7 @@ def main():
         ar_path = f"{region}-docker.pkg.dev/{project}/{name}/"
         tags, digests = deployed(live, ar_path)
         images = gcloud("artifacts", "docker", "images", "list", ar_path.rstrip("/"), "--include-tags")
-        doomed = to_delete(images, tags, digests, now)
+        doomed = to_delete(images, tags, digests, now, keep_n)
         # image indexes (buildx) report no size; only their per-platform manifests do
         size = sum(int(s) for v in doomed if str(s := v.get("metadata", {}).get("imageSizeBytes")).isdigit())
         total += size

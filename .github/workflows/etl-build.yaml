@@ -91,7 +91,7 @@ jobs:
             # Existing repos: etl/ar_cleanup.py (one-off, dry-run by default).
             cat > "$RUNNER_TEMP/ar-policy.json" <<'JSON'
           [
-            {"name": "keep-last-10", "action": {"type": "Keep"}, "mostRecentVersions": {"keepCount": 10}},
+            {"name": "keep-last-30", "action": {"type": "Keep"}, "mostRecentVersions": {"keepCount": 30}},
             {"name": "delete-tagged", "action": {"type": "Delete"}, "condition": {"tagState": "tagged"}},
             {"name": "delete-untagged-7d", "action": {"type": "Delete"}, "condition": {"tagState": "untagged", "olderThan": "7d"}}
           ]
