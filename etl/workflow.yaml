@@ -9,7 +9,8 @@ main:
     - init:
         assign:
           - final_args_list: ${default(map.get(input, "args"), [])}
-          - labels: ${default(map.get(input, "labels"), {})}
+          - labels: {}  # Workflows expressions have no map literal; default in two steps
+          - labels: ${default(map.get(input, "labels"), labels)}
           - project: ${sys.get_env("GCP_PROJECT_ID")}
           - region: ${sys.get_env("GCP_REGION")}
           - job_name: ${sys.get_env("JOB_NAME")}
