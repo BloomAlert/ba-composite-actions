@@ -149,7 +149,7 @@ Workflow etl/workflow.yaml (generic, one per flow)
 
 **RUN-05 (Artifact Registry):**
 - `etl-build` sets the cleanup policy once, when it creates `<repo>-<env>` ([`etl/ar-cleanup-policy.json`](../etl/ar-cleanup-policy.json)):
-  - keep the 10 most recent versions of each image
+  - keep the 30 most recent versions of each image (~10 single-platform builds: each buildx push is an index + image + provenance attestation)
   - delete all other tagged versions
   - delete untagged versions older than 7 days
   - AR never deletes manifests that a kept image index references.
