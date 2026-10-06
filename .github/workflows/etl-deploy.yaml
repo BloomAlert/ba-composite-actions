@@ -96,6 +96,7 @@ jobs:
           DECL: ${{ inputs.declaration }}
           PROJECT: ${{ vars.GCP_PROJECT_ID }}
           REGION: ${{ vars.GCP_REGION }}
+          ENVIRONMENT: ${{ inputs.environment }}
         run: |
           yq -o=json '.' "$DECL" > "$RUNNER_TEMP/decl.json"
           .etl-ci/etl/live.sh "$PROJECT" "$REGION" "$RUNNER_TEMP/decl.json" > "$RUNNER_TEMP/live.json"

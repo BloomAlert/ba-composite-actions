@@ -170,8 +170,10 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
         die("secrets must be a mapping ENV_NAME: <secret-manager-secret>[:version]")
     set_secrets = []
     for name, ref in sm.items():
-        secret, _, version = str(ref).partition(":")
+        secret, _, version = str(ref).replace("{env}", env).partition(":")
         version = version or "latest"
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):  # `,`/`=` would split the flag, `/` mounts a file
+            die(f"secrets {name!r}: not a valid env var name")
         if name in job_env:
             die(f"secrets {name}: also set as a plain env var")
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,255}", secret) or not re.fullmatch(r"latest|[1-9]\d*", version):

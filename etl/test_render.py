@@ -125,7 +125,7 @@ def main():
     assert not os.path.exists(os.path.join(leak.out, "job-env.yaml"))
     optional = render("stormglass", drop=("STORMGLASS_SECRET_KEY",), secrets={**SECRETS, "STORMGLASS_SECRET_KEY": "x"},
                       patch=lambda d: d.update(env=[e + "?" if e == "STORMGLASS_SECRET_KEY" else e for e in d["env"]]))
-    assert "is a GitHub secret" in optional.stderr  # optional doesn't silently drop it either
+    assert optional.returncode != 0 and "is a GitHub secret" in optional.stderr  # optional doesn't drop it silently
 
     # `secrets:` -> --set-secrets refs to existing Secret Manager secrets, value never in env files
     sm = render("stormglass", patch=lambda d: d.update(secrets={"SLACK_BOT_TOKEN": "slack-bot-token",
@@ -133,6 +133,11 @@ def main():
     assert "--set-secrets=SLACK_BOT_TOKEN=slack-bot-token:latest,PINNED=slack-bot-token:3" in sm.stdout, sm.stderr
     assert "--clear-secrets" not in sm.stdout
     assert "SLACK_BOT_TOKEN" not in json.load(open(os.path.join(sm.out, "job-env.yaml")))
+    per_env = render("stormglass", patch=lambda d: d.update(secrets={"T": "slack-bot-{env}"}),
+                     live={**synthetic_live(), "secrets": ["slack-bot-staging"]})
+    assert "--set-secrets=T=slack-bot-staging:latest" in per_env.stdout, per_env.stderr
+    assert "not a valid env var name" in render("stormglass", patch=lambda d: d.update(
+        secrets={"A=x:1,B": "slack-bot-token"})).stderr
     missing = render("stormglass", patch=lambda d: d.update(secrets={"X": "not-in-sm"}))
     assert missing.returncode != 0 and "not-in-sm not found" in missing.stderr, missing.stderr
     assert "also set as a plain env" in render("stormglass", patch=lambda d: d.update(

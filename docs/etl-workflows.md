@@ -71,7 +71,7 @@ env:                          # each value is looked up in vars ONLY (never GitH
   - SFTP_BANNER_TIMEOUT?      # optional: unset -> omitted (otherwise the deploy fails)
   - AUTH0_CLIENT_SECRET_KEY   # pointer: the var holds a Secret Manager secret NAME (APP-03)
 secrets:                      # optional: ENV_NAME: <existing Secret Manager secret>[:<version>], default latest
-  SLACK_BOT_TOKEN: slack-bot-token-staging
+  SLACK_BOT_TOKEN: slack-bot-token-{env}   # {env} substituted
 time_zone: America/Santiago   # required here or per instance
 retry: {count: 16, backoff_seconds: 1800}   # optional
 next: etl-ingestion-cmems-timeseries        # optional: Workflow (minus -<env>) started on success, same input

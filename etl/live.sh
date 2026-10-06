@@ -5,8 +5,10 @@ set -euo pipefail
 P="$1" R="$2"
 secrets='[]'
 if [[ -n "${3:-}" ]]; then
-  secrets=$(jq -r '.secrets // {} | .[] | tostring | split(":")[0]' "$3" | sort -u | while read -r s; do
-    if gcloud secrets describe "$s" --project="$P" --format='value(name)' >/dev/null; then echo "$s"; fi
+  # malformed `secrets:` -> empty here; render.py reports it
+  secrets=$(jq -r --arg env "${ENVIRONMENT:-}" '.secrets | objects | .[] | tostring | gsub("\\{env\\}"; $env)
+      | split(":")[0]' "$3" | sort -u | while read -r s; do
+    if gcloud secrets describe "$s" --project="$P" --format='value(name)' </dev/null >/dev/null; then echo "$s"; fi
   done | jq -Rn '[inputs]')
 fi
 jq -n \
