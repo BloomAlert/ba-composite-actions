@@ -24,7 +24,7 @@ def gcloud(*args):
 
 
 def deployed(live, ar_path):
-    """Tags and digests that live jobs run from this AR repo."""
+    """Tags and digests that live jobs (and services) run from this AR repo."""
     tags, digests = set(), set()
     for j in live.get("jobs", []):
         ref = j.get("image") or ""
@@ -70,6 +70,10 @@ def main():
     project, region, live_path = sys.argv[1:4]
     apply = "--apply" in sys.argv
     live = json.load(open(live_path))
+    # live.sh only lists jobs; an etl-* repo can also back a Cloud Run service, whose image must be kept too
+    live.setdefault("jobs", []).extend(
+        {"image": s["spec"]["template"]["spec"]["containers"][0]["image"]}
+        for s in gcloud("run", "services", "list", f"--project={project}", f"--region={region}"))
     base = json.load(open(os.path.join(HERE, "ar-cleanup-policy.json")))
     now, total = datetime.now(timezone.utc), 0
     for repo in gcloud("artifacts", "repositories", "list", f"--project={project}", f"--location={region}"):

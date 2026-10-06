@@ -122,6 +122,8 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
             for k in kinds:
                 replaced[k].add(n)
         schedulers.append((inst, sched))
+    if clash := sorted(n for k in KINDS for n in replaced[k] & declared[k]):
+        die(f"replaces {clash}, which this flow also declares (in-place adoption needs no `replaces`)")
     for n in replaced["schedulers"]:
         t = target(live_names["schedulers"][n])
         if t not in replaced["workflows"] | {wf_name}:
@@ -133,6 +135,8 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
 
     window = heartbeat_window(decl)
     metric = f"etl-heartbeat-{job_name}"
+    if not window:  # opted out: a leftover policy would fire forever (missing data = breach)
+        orphans += [(k, metric, "") for k in ("metrics", "policies") if metric in live_names[k]]
 
     if mode == "drift":
         missing = [f"{k}/{n}" for k in KINDS for n in sorted(declared[k]) if n not in live_names[k]]
@@ -166,7 +170,6 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
 
     cmds = [
         'source "$ETL_OUT/secrets.env"',
-        f"gcloud artifacts docker images describe {q(image)} --project={project} >/dev/null",
         (f"# {upsert('jobs', job_name)}\ngcloud run jobs deploy {job_name} --project={project} --region={region}"
         f" --image={q(image)} --service-account={token(job['service_account_var'])} --cpu={job['cpu']}"
         f" --memory={job['memory']} --task-timeout={timeout}s --max-retries=0 --quiet"
@@ -200,7 +203,8 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
         log_filter = (f'resource.type="cloud_run_job" AND resource.labels.job_name="{job_name}"'
                       f' AND logName="projects/{project}/logs/run.googleapis.com%2Fvarlog%2Fsystem"'
                       f' AND textPayload="Container called exit(0)."')
-        cmds.append(f"# {upsert('metrics', metric)}\ngcloud logging metrics {verb['metrics/' + metric]} {metric}"
+        v = upsert("metrics", metric)
+        cmds.append(f"# {v}\ngcloud logging metrics {v} {metric}"
                     f" --project={project} --description={q('etl-deploy heartbeat (ALERT-03)')}"
                     f" --log-filter={q(log_filter)}")
         if metric in live_names["metrics"]:
@@ -225,11 +229,11 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
                     },
                 }],
             }
-            if upsert("policies", metric) == "update":
-                cmds.append(f"# update\ngcloud monitoring policies update {live_names['policies'][metric]['name']}"
+            if (v := upsert("policies", metric)) == "update":
+                cmds.append(f"# {v}\ngcloud monitoring policies update {live_names['policies'][metric]['name']}"
                             f' --project={project} --policy-from-file="$ETL_OUT/heartbeat-policy.json"')
             else:
-                cmds.append(f"# create\ngcloud monitoring policies create --project={project}"
+                cmds.append(f"# {v}\ngcloud monitoring policies create --project={project}"
                             ' --policy-from-file="$ETL_OUT/heartbeat-policy.json"')
         else:
             cmds.append("# heartbeat policy deferred: its metric is new, so it's created on the next deploy")
