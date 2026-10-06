@@ -114,7 +114,7 @@ Workflow etl/workflow.yaml (generic, one per flow)
   - `title`, and `summary` (the error message)
   - `log_uri`: the execution's console logs
   - `context`: the instance labels, plus:
-    - `exit_code`: the first task's `lastAttemptResult.exitCode`
+    - `exit_code`: on failure, the first task's `lastAttemptResult.exitCode`; `0` on success
     - `exit_class`: APP-05 classes (0 ok, 1 bug, 2 config, 3 transient source, else unknown)
     - `execution`, `attempt`, `args`
   - Notifying is **fail-soft**: a notifier error is logged and never fails the workflow.
@@ -124,18 +124,18 @@ Workflow etl/workflow.yaml (generic, one per flow)
 
 `etl/live.sh` takes a read-only snapshot of jobs, workflows, schedulers, `etl-heartbeat-*` metrics and policies. `etl/render.py` turns the declaration plus that snapshot into a bash plan, where each resource is a `create` or an `update`:
 
-1. `artifacts docker images describe <image>:<sha>`
-2. `run jobs deploy <job> --env-vars-file`
-3. `workflows deploy <wf> --source=etl/workflow.yaml --env-vars-file`. `etl-deploy` checks this repo out at its own commit (OIDC `job_workflow_sha`).
-4. `scheduler jobs create|update http`, once per instance.
-5. **Orphans (RUN-04),** right after the schedulers:
+1. `run jobs deploy <job> --image=<image>:<sha> --env-vars-file` (fails before anything changes if the image wasn't built)
+2. `workflows deploy <wf> --source=etl/workflow.yaml --env-vars-file`. `etl-deploy` checks this repo out at its own commit (OIDC `job_workflow_sha`).
+3. `scheduler jobs create|update http`, once per instance.
+4. **Orphans (RUN-04),** right after the schedulers:
    - What counts as an orphan:
      - everything named in `replaces`
      - schedulers that target this flow's workflow but aren't declared (removed instances)
+     - the flow's own heartbeat metric/policy when it sets `heartbeat: false`
    - ENABLED orphan schedulers are **paused**, so two schedulers never fire.
    - All orphans are printed. Nothing is deleted: delete them by hand after prod is verified, then drop the `replaces` entries.
-   - The deploy **fails** if a `replaces` name doesn't exist, or if a replaced scheduler targets a workflow this flow neither owns nor replaces. That keeps flows independent of deploy order.
-6. **Heartbeat (ALERT-03):**
+   - The deploy **fails** if a `replaces` name doesn't exist, if a replaced scheduler targets a workflow this flow neither owns nor replaces, or if a `replaces` name is also declared by the flow (in-place adoption needs no `replaces`). That keeps flows independent of deploy order.
+5. **Heartbeat (ALERT-03):**
    - log metric `etl-heartbeat-<job>`: the job's `Container called exit(0).` lines
    - alert policy of the same name, which fires when the sum is < 1 over the window
    - missing data counts as a breach (the ba-infra pattern)
@@ -155,7 +155,7 @@ Workflow etl/workflow.yaml (generic, one per flow)
   - AR never deletes manifests that a kept image index references.
 - Existing repos get it from the one-off `etl/ar_cleanup.py PROJECT REGION live.json [--apply]`.
   - It is a **dry run by default**: it lists, per repo, what the policy would delete.
-  - With `--apply` it also adds a Keep rule for every image a live job runs.
+  - With `--apply` it also adds a Keep rule for every image a live Cloud Run job or service runs.
 
 Self-check: `python3 etl/test_render.py` (needs `yq`). Proof mode: `python3 etl/test_render.py live.json`.
 
@@ -176,4 +176,4 @@ It needs names only, not values.
 | drift (read-only) | `roles/run.viewer`, `roles/workflows.viewer`, `roles/cloudscheduler.viewer`, `roles/logging.viewer` (metrics list), `roles/monitoring.viewer` |
 | workflow | what it has today (`run.jobs.runWithOverrides`, `run.invoker` on ba-ops-notify), plus `roles/run.viewer` (`tasks.list` for the exit code) and `roles/workflows.invoker` (`next`) |
 | build | `roles/artifactregistry.writer`, plus `artifactregistry.repositories.create` and `.update` (set the policy at creation; `repoAdmin` lacks `update`) |
-| `ar_cleanup.py` operator | `roles/artifactregistry.reader` for the dry run; `roles/artifactregistry.admin` to `--apply` |
+| `ar_cleanup.py` operator | `roles/artifactregistry.reader` + `roles/run.viewer` for the dry run; `roles/artifactregistry.admin` to `--apply` |

@@ -117,10 +117,15 @@ notify:
           - project: ${sys.get_env("GCP_PROJECT_ID")}
           - region: ${sys.get_env("GCP_REGION")}
           - job_name: ${sys.get_env("JOB_NAME")}
-          - exit_code: "unknown"
+          - exit_code: ${if(event_type == "job_failed", "unknown", "0")}
+          # APP-05 exit codes
+          - exit_classes:
+              "0": ok
+              "1": bug
+              "2": config
+              "3": transient source
           - console: https://console.cloud.google.com/run/jobs/
           - log_uri: ${console + "details/" + region + "/" + job_name + "/logs?project=" + project}
-          - context: ${labels}
     - read_exit_code:
         switch:
           - condition: ${execution != null}
@@ -129,54 +134,34 @@ notify:
                   assign:
                     - parts: ${text.split(execution, "/")}
                     - log_uri: ${console + "executions/details/" + region + "/" + parts[len(parts) - 1] + "/logs?project=" + project}
-              - exit_code_lookup:
-                  try:
-                    steps:
-                      - list_tasks:
-                          call: googleapis.run.v2.projects.locations.jobs.executions.tasks.list
-                          args:
-                            parent: ${execution}
-                          result: task_page
-                      - first_task_code:
-                          assign:
-                            - exit_code: ${string(task_page.tasks[0].lastAttemptResult.exitCode)}
-                  except:
-                    as: ignored
-                    steps:
-                      - keep_unknown:
-                          assign:
-                            - exit_code: "unknown"
-    # APP-05 exit codes
+              - exit_code_lookup:  # success is exit 0 by definition
+                  switch:
+                    - condition: ${event_type == "job_failed"}
+                      steps:
+                        - list_tasks_try:
+                            try:
+                              steps:
+                                - list_tasks:
+                                    call: googleapis.run.v2.projects.locations.jobs.executions.tasks.list
+                                    args:
+                                      parent: ${execution}
+                                    result: task_page
+                                - first_task_code:
+                                    assign:
+                                      - exit_code: ${string(task_page.tasks[0].lastAttemptResult.exitCode)}
+                            except:
+                              as: ignored
+                              steps:
+                                - keep_unknown:
+                                    assign:
+                                      - exit_code: "unknown"
     - classify:
-        switch:
-          - condition: ${exit_code == "0"}
-            assign:
-              - exit_class: ok
-          - condition: ${exit_code == "1"}
-            assign:
-              - exit_class: bug
-          - condition: ${exit_code == "2"}
-            assign:
-              - exit_class: config
-          - condition: ${exit_code == "3"}
-            assign:
-              - exit_class: transient source
-          - condition: true
-            assign:
-              - exit_class: unknown
-    - add_context:
-        for:
-          value: key
-          in: ${keys(extra)}
-          steps:
-            - copy:
-                assign:
-                  - context[key]: ${extra[key]}
-    - add_fixed_context:
         assign:
+          - context: ${map.merge(labels, extra)}
+          - context["exit_class"]: ${default(map.get(exit_classes, exit_code), "unknown")}
           - context["exit_code"]: ${exit_code}
-          - context["exit_class"]: ${exit_class}
           - context["execution"]: ${default(execution, "not started")}
+          - exit_class: ${context["exit_class"]}
     - post:
         try:
           call: http.post

@@ -36,6 +36,11 @@ on:
 
 permissions: {}
 
+# explicit bash = -eo pipefail (the implicit default has no pipefail, so `render.py | tee` would hide a die)
+defaults:
+  run:
+    shell: bash
+
 jobs:
   deploy:
     if: inputs.mode == 'deploy'
@@ -68,7 +73,7 @@ jobs:
           # OIDC claim job_workflow_sha = the ba-composite-actions commit the caller pinned
           curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL" \
             | jq -r '.value | split(".")[1] | gsub("-"; "+") | gsub("_"; "/") | @base64d | fromjson
-                     | "sha=\(.job_workflow_sha)"' >> "$GITHUB_OUTPUT"
+                     | "sha=\(.job_workflow_sha // error("no job_workflow_sha claim"))"' >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -150,7 +155,7 @@ jobs:
         run: |
           curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL" \
             | jq -r '.value | split(".")[1] | gsub("-"; "+") | gsub("_"; "/") | @base64d | fromjson
-                     | "sha=\(.job_workflow_sha)"' >> "$GITHUB_OUTPUT"
+                     | "sha=\(.job_workflow_sha // error("no job_workflow_sha claim"))"' >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

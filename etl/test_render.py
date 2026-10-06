@@ -124,6 +124,15 @@ def main():
         d["instances"][0]["replaces"] = ["schedule-does-not-exist-{env}"]
     assert "doesn't exist" in render("stormglass", patch=gone).stderr
 
+    def adopt(d):  # replacing a name the flow itself declares would update then pause it
+        d["instances"][0]["replaces"] = ["etl-ingestion-stormglass-{env}"]
+    live = synthetic_live()
+    live["jobs"].append({"name": "etl-ingestion-stormglass-staging"})
+    assert "also declares" in render("stormglass", patch=adopt, live=live).stderr
+
+    off = render("ews", patch=lambda d: d.update(heartbeat=False))  # opt-out lists the leftover metric
+    assert "echo '  metrics/etl-heartbeat-etl-ews-ingestion-staging'" in off.stdout, off.stdout + off.stderr
+
     def weekly(d):  # (6) sparser than daily needs an explicit window
         d["instances"][0]["schedule"] = "0 13 * * MON"
     assert "heartbeat_window" in render("stormglass", patch=weekly).stderr
