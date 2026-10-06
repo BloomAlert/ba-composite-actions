@@ -4,6 +4,7 @@ Without LIVE_JSON it uses a synthetic snapshot; with one (from etl/live.sh) it p
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -165,6 +166,9 @@ def main():
     build = open(os.path.join(ROOT, ".github", "workflows", "etl-build.yaml")).read()
     inline = build.split("<<'JSON'\n", 1)[1].split("\n          JSON", 1)[0]
     assert json.loads(inline) == json.load(open(os.path.join(HERE, "ar-cleanup-policy.json")))
+    # Workflows expressions have no {} map literal (gcloud deploy rejects it; found 2026-10-06 on ews staging).
+    wf = open(os.path.join(HERE, "workflow.yaml")).read()
+    assert not re.search(r"\$\{[^}]*\{\}", wf), "map literal {} inside ${...} in workflow.yaml"
     print("ok")
 
 
