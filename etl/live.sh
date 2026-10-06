@@ -6,8 +6,8 @@ P="$1" R="$2"
 secrets='[]'
 if [[ -n "${3:-}" ]]; then
   secrets=$(jq -r '.secrets // {} | .[] | tostring | split(":")[0]' "$3" | sort -u | while read -r s; do
-    if gcloud secrets describe "$s" --project="$P" --format='value(name)' >/dev/null; then jq -n --arg s "$s" '$s'; fi
-  done | jq -s .)
+    if gcloud secrets describe "$s" --project="$P" --format='value(name)' >/dev/null; then echo "$s"; fi
+  done | jq -Rn '[inputs]')
 fi
 jq -n \
   --argjson jobs "$(gcloud run jobs list --project="$P" --region="$R" --format=json \

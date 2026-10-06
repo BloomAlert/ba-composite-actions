@@ -21,8 +21,7 @@ on:
         description: Print every gcloud command (values redacted) and the orphan list; execute nothing
         type: boolean
         default: false
-    # Callers pass `secrets: inherit` (SA emails, notify URL). Declaration `env` reads vars only;
-    # runtime credentials come from Secret Manager (pointer var or the declaration's `secrets:`).
+    # Callers pass `secrets: inherit` (SA emails, notify URL). Declaration `env` reads vars only (docs/etl-workflows.md#credentials-secret-manager-only).
     secrets:
       GCP_WORKLOAD_IDENTITY_PROVIDER:
         required: true

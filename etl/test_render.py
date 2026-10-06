@@ -124,8 +124,7 @@ def main():
     assert leak.returncode != 0 and "is a GitHub secret" in leak.stderr, leak.stderr
     assert not os.path.exists(os.path.join(leak.out, "job-env.yaml"))
     optional = render("stormglass", drop=("STORMGLASS_SECRET_KEY",), secrets={**SECRETS, "STORMGLASS_SECRET_KEY": "x"},
-                      patch=lambda d: d["env"].__setitem__(d["env"].index("STORMGLASS_SECRET_KEY"),
-                                                            "STORMGLASS_SECRET_KEY?"))
+                      patch=lambda d: d.update(env=[e + "?" if e == "STORMGLASS_SECRET_KEY" else e for e in d["env"]]))
     assert "is a GitHub secret" in optional.stderr  # optional doesn't silently drop it either
 
     # `secrets:` -> --set-secrets refs to existing Secret Manager secrets, value never in env files
