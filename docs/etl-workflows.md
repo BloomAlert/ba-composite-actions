@@ -31,7 +31,8 @@ Callers pass `secrets: inherit`. Each name below is looked up in vars, then in s
 | `GCP_DRIFT_SERVICE_ACCOUNT` | drift: a **read-only** SA |
 | `ETL_OPS_NOTIFY_URL` | deploy: the env's ba-ops-notify URL, set as the Workflow's `NOTIFY_URL` |
 | `ETL_ALERT_CHANNEL` | deploy: the notification channel of `#etl-errors-<env>` (`projects/…/notificationChannels/…`) |
-| the declaration's `job.service_account_var` and `env` names | deploy |
+| the declaration's `job.service_account_var` | deploy |
+| the declaration's `env` names | deploy: **vars only** (below) |
 
 **Jobs and environments:**
 - **Deploy** runs with `environment: <env>`, so environment-level values resolve.
@@ -64,10 +65,13 @@ job:
   cpu: 2
   memory: 8Gi
   timeout: 1200s              # Ns/Nm/Nh; the Workflow waits timeout + 600s for jobs.run
-env:                          # each value is looked up in vars, then secrets
-  - AUTH0_DOMAIN              # NAME           = var/secret NAME
+env:                          # each value is looked up in vars ONLY (never GitHub secrets)
+  - AUTH0_DOMAIN              # NAME           = var NAME
   - GCP_BUCKET_NAME=GCP_MAPS_BUCKET   # NAME=SOURCE
   - SFTP_BANNER_TIMEOUT?      # optional: unset -> omitted (otherwise the deploy fails)
+  - AUTH0_CLIENT_SECRET_KEY   # pointer: the var holds a Secret Manager secret NAME (APP-03)
+secrets:                      # optional: ENV_NAME: <existing Secret Manager secret>[:<version>], default latest
+  SLACK_BOT_TOKEN: slack-bot-token-staging
 time_zone: America/Santiago   # required here or per instance
 retry: {count: 16, backoff_seconds: 1800}   # optional
 next: etl-ingestion-cmems-timeseries        # optional: Workflow (minus -<env>) started on success, same input
@@ -83,7 +87,23 @@ instances:                    # one Scheduler each; name = [a-z0-9-], also the `
       - schedule-map-ingestion-chl-02-{env}
 ```
 
-`ENVIRONMENT` and `GCP_PROJECT_ID` are always set on the job. Each deploy sets the full env (`--env-vars-file` replaces it).
+`ENVIRONMENT` and `GCP_PROJECT_ID` are always set on the job. Each deploy sets the full env (`--env-vars-file` replaces it) and all secret refs (`--set-secrets`, or `--clear-secrets` when none are declared).
+
+### Credentials (Secret Manager only)
+
+A credential's value never goes through GitHub into the job's plain env (readable by anyone with `run.jobs.get`). Two patterns, both on secrets that **already exist** in Secret Manager; `etl-deploy` never creates a secret or copies a value into one:
+
+1. **Pointer (preferred, APP-03; etl-template `docs/standard.md`).** A var `FOO_KEY=<secret-name>` goes in `env`; the app fetches the value at runtime with the Secret Manager client.
+2. **`secrets:`** for third-party code that needs the value itself in an env var. `NAME: <secret>[:<version>]` renders `--set-secrets NAME=<secret>:<version|latest>`; Cloud Run resolves it at execution start.
+
+The render **fails** when:
+- an `env` name exists only as a GitHub secret (move the name into a var as a pointer, or map it under `secrets:`); this applies to optional `NAME?` entries too
+- a `secrets:` secret doesn't exist in the project: `live.sh` runs `gcloud secrets describe` on each (read-only, metadata only)
+- a `secrets:` name is also in `env`, or the reference isn't `<secret>[:<n>|latest]`
+
+**IAM (grant it yourself, outside this workflow):**
+- the job's runtime SA (`job.service_account_var`) needs `roles/secretmanager.secretAccessor` on each secret it reads, for both patterns
+- the deploy SA needs `secretmanager.secrets.get` (e.g. `roles/secretmanager.viewer`) on each `secrets:` secret, for the existence check
 
 ## Naming (RUN-02)
 
@@ -122,9 +142,9 @@ Workflow etl/workflow.yaml (generic, one per flow)
 
 ## Deploy steps (`dry_run` prints them only)
 
-`etl/live.sh` takes a read-only snapshot of jobs, workflows, schedulers, `etl-heartbeat-*` metrics and policies. `etl/render.py` turns the declaration plus that snapshot into a bash plan, where each resource is a `create` or an `update`:
+`etl/live.sh` takes a read-only snapshot of jobs, workflows, schedulers, `etl-heartbeat-*` metrics and policies, and which of the declaration's `secrets:` exist. `etl/render.py` turns the declaration plus that snapshot into a bash plan, where each resource is a `create` or an `update`:
 
-1. `run jobs deploy <job> --image=<image>:<sha> --env-vars-file` (fails before anything changes if the image wasn't built)
+1. `run jobs deploy <job> --image=<image>:<sha> --env-vars-file --set-secrets|--clear-secrets` (fails before anything changes if the image wasn't built)
 2. `workflows deploy <wf> --source=etl/workflow.yaml --env-vars-file`. `etl-deploy` checks this repo out at its own commit (OIDC `job_workflow_sha`).
 3. `scheduler jobs create|update http`, once per instance.
 4. **Orphans (RUN-04),** right after the schedulers:

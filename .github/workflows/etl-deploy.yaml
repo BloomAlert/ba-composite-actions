@@ -21,7 +21,8 @@ on:
         description: Print every gcloud command (values redacted) and the orphan list; execute nothing
         type: boolean
         default: false
-    # Callers pass `secrets: inherit`: declaration env entries may name any secret.
+    # Callers pass `secrets: inherit` (SA emails, notify URL). Declaration `env` reads vars only;
+    # runtime credentials come from Secret Manager (pointer var or the declaration's `secrets:`).
     secrets:
       GCP_WORKLOAD_IDENTITY_PROVIDER:
         required: true
@@ -98,7 +99,7 @@ jobs:
           REGION: ${{ vars.GCP_REGION }}
         run: |
           yq -o=json '.' "$DECL" > "$RUNNER_TEMP/decl.json"
-          .etl-ci/etl/live.sh "$PROJECT" "$REGION" > "$RUNNER_TEMP/live.json"
+          .etl-ci/etl/live.sh "$PROJECT" "$REGION" "$RUNNER_TEMP/decl.json" > "$RUNNER_TEMP/live.json"
 
       - name: Render plan
         env:

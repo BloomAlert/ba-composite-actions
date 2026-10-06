@@ -4,6 +4,7 @@
     render.py deploy|drift DECL_JSON LIVE_JSON
 
 Env: ENVIRONMENT, REPO, SHA, CI_DIR, ETL_OUT, VARS_JSON, SECRETS_JSON (GitHub `vars`/`secrets`).
+Job `env` resolves from vars only; `secrets:` become --set-secrets refs to existing Secret Manager secrets.
 deploy -> prints a bash script and writes its value files to $ETL_OUT (nothing runs here; no secret
 value is ever printed). drift -> prints drift, exit 1 if any (names only, no values needed).
 """
@@ -155,11 +156,30 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
         target_name, _, source = item.partition("=")
         optional = target_name.endswith("?")
         target_name = target_name.rstrip("?")
-        value = vars_.get(source or target_name) or secrets.get(source or target_name)
-        if value:
-            job_env[target_name] = value
+        src = source or target_name
+        if vars_.get(src):
+            job_env[target_name] = vars_[src]
+        elif src in secrets:  # never render a GitHub secret's value into plain job env
+            die(f"env {target_name}: {src} is a GitHub secret, but `env` reads vars only. Either store the"
+                " Secret Manager secret's *name* in a var (pointer pattern, APP-03) or map it under `secrets:`"
+                " (docs/etl-workflows.md)")
         elif not optional:
-            die(f"env {target_name}: no var/secret named {source or target_name}")
+            die(f"env {target_name}: no var named {src}")
+    sm = decl.get("secrets") or {}
+    if not isinstance(sm, dict):
+        die("secrets must be a mapping ENV_NAME: <secret-manager-secret>[:version]")
+    set_secrets = []
+    for name, ref in sm.items():
+        secret, _, version = str(ref).partition(":")
+        version = version or "latest"
+        if name in job_env:
+            die(f"secrets {name}: also set as a plain env var")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,255}", secret) or not re.fullmatch(r"latest|[1-9]\d*", version):
+            die(f"secrets {name}: bad reference {ref!r} (use <secret-name>[:<version>|latest])")
+        if secret not in live.get("secrets", []):  # etl-deploy never creates secrets or copies values
+            die(f"secrets {name}: Secret Manager secret {secret} not found in {project}"
+                " (or the deploy SA can't describe it); create it there first")
+        set_secrets.append(f"{name}={secret}:{version}")
     retry, nxt = decl.get("retry", {}), decl.get("next")
     wf_env = {"GCP_PROJECT_ID": project, "GCP_REGION": region, "ENVIRONMENT": env, "JOB_NAME": job_name,
               "JOB_TIMEOUT_SECONDS": timeout, "NOTIFY_URL": need("ETL_OPS_NOTIFY_URL"),
@@ -173,7 +193,8 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
         (f"# {upsert('jobs', job_name)}\ngcloud run jobs deploy {job_name} --project={project} --region={region}"
         f" --image={q(image)} --service-account={token(job['service_account_var'])} --cpu={job['cpu']}"
         f" --memory={job['memory']} --task-timeout={timeout}s --max-retries=0 --quiet"
-        ' --env-vars-file="$ETL_OUT/job-env.yaml"'),
+        ' --env-vars-file="$ETL_OUT/job-env.yaml"'
+        + (f" --set-secrets={q(','.join(set_secrets))}" if set_secrets else " --clear-secrets")),
         (f"# {upsert('workflows', wf_name)}\ngcloud workflows deploy {wf_name} --project={project}"
         f" --location={region} --source={q(ci_dir + '/etl/workflow.yaml')}"
         f" --service-account={token('GCP_WORKFLOW_SERVICE_ACCOUNT')} --quiet"
