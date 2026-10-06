@@ -91,8 +91,10 @@ def main():
         print(f"{name}: delete {len(doomed)}/{len(images)} versions, {size / 2**30:.1f} GiB;"
               f" keeping deployed {sorted(tags | digests)}")
         if apply:
-            keep = {k: sorted(v) for k, v in (("tagPrefixes", tags), ("versionNamePrefixes", digests)) if v}
-            policy = base + ([{"name": "keep-deployed", "action": {"type": "Keep"}, "condition": keep}] if keep else [])
+            # AR ANDs conditions within one rule, so tags and digests need separate rules; prefixes max 64 chars
+            policy = base + [{"name": f"keep-deployed-{n}", "action": {"type": "Keep"},
+                              "condition": {k: sorted(x[:64] for x in v)}}
+                             for n, k, v in (("tags", "tagPrefixes", tags), ("digests", "versionNamePrefixes", digests)) if v]
             with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
                 json.dump(policy, f)
             subprocess.run(["gcloud", "artifacts", "repositories", "set-cleanup-policies", name,
