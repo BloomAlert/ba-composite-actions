@@ -8,7 +8,6 @@ on:
       - ".github/workflows/cicd.yaml"
       - "deploy/runtime.yaml"
       - "src/**"
-      - ".python-version"
       - ".dockerignore"
       - "pyproject.toml"
       - "uv.lock"
