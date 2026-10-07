@@ -76,6 +76,8 @@ def main():
         for s in gcloud("run", "services", "list", f"--project={project}", f"--region={region}"))
     base = json.load(open(os.path.join(HERE, "ar-cleanup-policy.json")))
     keep_n = next(r["mostRecentVersions"]["keepCount"] for r in base if "mostRecentVersions" in r)
+    # ponytail: exact match on the base Keep rules' tagPrefixes (only `deployed` exists); estimate only
+    keep_tags = {t for r in base if r["action"]["type"] == "Keep" for t in r.get("condition", {}).get("tagPrefixes", [])}
     now, total = datetime.now(timezone.utc), 0
     for repo in gcloud("artifacts", "repositories", "list", f"--project={project}", f"--location={region}"):
         name = repo["name"].split("/")[-1]
@@ -84,7 +86,7 @@ def main():
         ar_path = f"{region}-docker.pkg.dev/{project}/{name}/"
         tags, digests = deployed(live, ar_path)
         images = gcloud("artifacts", "docker", "images", "list", ar_path.rstrip("/"), "--include-tags")
-        doomed = to_delete(images, tags | {"deployed"}, digests, now, keep_n)  # base keep-deployed rule
+        doomed = to_delete(images, tags | keep_tags, digests, now, keep_n)
         # image indexes (buildx) report no size; only their per-platform manifests do
         size = sum(int(s) for v in doomed if str(s := v.get("metadata", {}).get("imageSizeBytes")).isdigit())
         total += size
