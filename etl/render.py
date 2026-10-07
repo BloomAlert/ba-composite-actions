@@ -150,7 +150,8 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
     # ---- deploy: values go to files in $ETL_OUT, never into the plan
     job = decl["job"]
     timeout = seconds(job["timeout"])
-    image = f"{region}-docker.pkg.dev/{project}/{repo}-{env}/{decl['image']}:{sha}"
+    image_path = f"{region}-docker.pkg.dev/{project}/{repo}-{env}/{decl['image']}"
+    image = f"{image_path}:{sha}"
     job_env = {"ENVIRONMENT": env, "GCP_PROJECT_ID": project}
     for item in decl.get("env", []):
         target_name, _, source = item.partition("=")
@@ -197,6 +198,8 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
         f" --memory={job['memory']} --task-timeout={timeout}s --max-retries=0 --quiet"
         ' --env-vars-file="$ETL_OUT/job-env.yaml"'
         + (f" --set-secrets={q(','.join(set_secrets))}" if set_secrets else " --clear-secrets")),
+        # RUN-05: only once the job runs this image; moves this image name's :deployed (AR keep-deployed rule)
+        f"gcloud artifacts docker tags add {q(image)} {q(image_path + ':deployed')} --quiet",
         (f"# {upsert('workflows', wf_name)}\ngcloud workflows deploy {wf_name} --project={project}"
         f" --location={region} --source={q(ci_dir + '/etl/workflow.yaml')}"
         f" --service-account={token('GCP_WORKFLOW_SERVICE_ACCOUNT')} --quiet"
