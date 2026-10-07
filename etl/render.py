@@ -263,6 +263,12 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
     else:
         cmds.append("# heartbeat: disabled in the declaration (heartbeat: false)")
 
+    # RUN-05: last, so it runs only if every step above succeeded. Moves this image name's :deployed
+    # (AR keep-deployed rule) to the digest just deployed; flows sharing an image share the tag.
+    repo_image = image.rsplit(":", 1)[0]
+    cmds.append(f"DIGEST=$(gcloud artifacts docker images describe {q(image)} --format='value(image_summary.digest)')\n"
+                f'gcloud artifacts docker tags add {q(repo_image)}@"$DIGEST" {q(repo_image + ":deployed")} --quiet')
+
     files["secrets.env"] = "".join(f"export {k}={q(v)}\n" for k, v in secret_env.items())
     return dict(cmds=cmds, verb=verb, orphans=orphans, pauses=pauses, files=files)
 

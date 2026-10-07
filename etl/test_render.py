@@ -102,6 +102,10 @@ def main():
     wf_env = json.load(open(os.path.join(r.out, "workflow-env.yaml")))
     assert wf_env["JOB_TIMEOUT_SECONDS"] == "600" and wf_env["NOTIFY_URL"] == "https://notify.example"
     assert '"alignmentPeriod": "3600s"' in open(os.path.join(r.out, "heartbeat-policy.json")).read()  # */15 -> 1h
+    img = f"{R}-docker.pkg.dev/{P}/etl-ingestion-ews-gcp-staging/main"  # RUN-05: :deployed moves last
+    assert ews.splitlines()[-3:-1] == [
+        f"DIGEST=$(gcloud artifacts docker images describe {img}:abc123 --format='value(image_summary.digest)')",
+        f'gcloud artifacts docker tags add {img}@"$DIGEST" {img}:deployed --quiet'], ews
 
     r = render("stormglass")
     sg = r.stdout

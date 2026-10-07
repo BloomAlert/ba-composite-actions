@@ -166,9 +166,11 @@ Workflow etl/workflow.yaml (generic, one per flow)
      - anything else (day-of-week/month, names, ranges) needs `heartbeat_window` or `heartbeat: false`, otherwise the deploy fails
      - with several instances, the smallest window wins
    - The policy is created only once the metric exists, i.e. from the second deploy on, so a metric with no data yet can't raise a false alarm.
+6. **`:deployed` tag (RUN-05),** last, so only after every step above succeeded (never on `dry_run`): moves `<image>:deployed` to the digest of `<image>:<sha>`. The tag is per image name, so flows sharing an image (cmems `map`) share it: it keeps only the most recent deploy of that image.
 
 **RUN-05 (Artifact Registry):**
 - `etl-build` sets the cleanup policy once, when it creates `<repo>-<env>` ([`etl/ar-cleanup-policy.json`](../etl/ar-cleanup-policy.json)):
+  - keep the version tagged `deployed` (what `etl-deploy` last deployed of each image)
   - keep the 30 most recent versions of each image (~10 single-platform builds: each buildx push is an index + image + provenance attestation)
   - delete all other tagged versions
   - delete untagged versions older than 7 days
@@ -192,7 +194,7 @@ It needs names only, not values.
 
 | SA | roles |
 |---|---|
-| deploy | `roles/run.developer`, `roles/workflows.editor`, `roles/cloudscheduler.admin` (pause included), `roles/logging.configWriter`, `roles/monitoring.alertPolicyEditor`, `roles/iam.serviceAccountUser` on the job, workflow and scheduler SAs. Possibly also `roles/monitoring.notificationChannelViewer`, if attaching the channel needs `notificationChannels.get` |
+| deploy | `roles/artifactregistry.writer` on `<repo>-<env>` (`tags add` needs `artifactregistry.tags.create`/`.update`), `roles/run.developer`, `roles/workflows.editor`, `roles/cloudscheduler.admin` (pause included), `roles/logging.configWriter`, `roles/monitoring.alertPolicyEditor`, `roles/iam.serviceAccountUser` on the job, workflow and scheduler SAs. Possibly also `roles/monitoring.notificationChannelViewer`, if attaching the channel needs `notificationChannels.get` |
 | drift (read-only) | `roles/run.viewer`, `roles/workflows.viewer`, `roles/cloudscheduler.viewer`, `roles/logging.viewer` (metrics list), `roles/monitoring.viewer` |
 | workflow | what it has today (`run.jobs.runWithOverrides`, `run.invoker` on ba-ops-notify), plus `roles/run.viewer` (`tasks.list` for the exit code) and `roles/workflows.invoker` (`next`) |
 | build | `roles/artifactregistry.writer`, plus `artifactregistry.repositories.create` and `.update` (set the policy at creation; `repoAdmin` lacks `update`) |

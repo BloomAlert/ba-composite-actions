@@ -84,7 +84,7 @@ def main():
         ar_path = f"{region}-docker.pkg.dev/{project}/{name}/"
         tags, digests = deployed(live, ar_path)
         images = gcloud("artifacts", "docker", "images", "list", ar_path.rstrip("/"), "--include-tags")
-        doomed = to_delete(images, tags, digests, now, keep_n)
+        doomed = to_delete(images, tags | {"deployed"}, digests, now, keep_n)  # base keep-deployed rule
         # image indexes (buildx) report no size; only their per-platform manifests do
         size = sum(int(s) for v in doomed if str(s := v.get("metadata", {}).get("imageSizeBytes")).isdigit())
         total += size
