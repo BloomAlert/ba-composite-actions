@@ -197,6 +197,8 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
         f" --memory={job['memory']} --task-timeout={timeout}s --max-retries=0 --quiet"
         ' --env-vars-file="$ETL_OUT/job-env.yaml"'
         + (f" --set-secrets={q(','.join(set_secrets))}" if set_secrets else " --clear-secrets")),
+        # RUN-05: only once the job runs this image; moves this image name's :deployed (AR keep-deployed rule)
+        f"gcloud artifacts docker tags add {q(image)} {q(image.rsplit(':', 1)[0] + ':deployed')} --quiet",
         (f"# {upsert('workflows', wf_name)}\ngcloud workflows deploy {wf_name} --project={project}"
         f" --location={region} --source={q(ci_dir + '/etl/workflow.yaml')}"
         f" --service-account={token('GCP_WORKFLOW_SERVICE_ACCOUNT')} --quiet"
@@ -262,12 +264,6 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
             cmds.append("# heartbeat policy deferred: its metric is new, so it's created on the next deploy")
     else:
         cmds.append("# heartbeat: disabled in the declaration (heartbeat: false)")
-
-    # RUN-05: last, so it runs only if every step above succeeded. Moves this image name's :deployed
-    # (AR keep-deployed rule) to the digest just deployed; flows sharing an image share the tag.
-    repo_image = image.rsplit(":", 1)[0]
-    cmds.append(f"DIGEST=$(gcloud artifacts docker images describe {q(image)} --format='value(image_summary.digest)')\n"
-                f'gcloud artifacts docker tags add {q(repo_image)}@"$DIGEST" {q(repo_image + ":deployed")} --quiet')
 
     files["secrets.env"] = "".join(f"export {k}={q(v)}\n" for k, v in secret_env.items())
     return dict(cmds=cmds, verb=verb, orphans=orphans, pauses=pauses, files=files)

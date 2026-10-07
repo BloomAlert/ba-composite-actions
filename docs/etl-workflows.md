@@ -145,6 +145,7 @@ Workflow etl/workflow.yaml (generic, one per flow)
 `etl/live.sh` takes a read-only snapshot of jobs, workflows, schedulers, `etl-heartbeat-*` metrics and policies, and which of the declaration's `secrets:` exist. `etl/render.py` turns the declaration plus that snapshot into a bash plan, where each resource is a `create` or an `update`:
 
 1. `run jobs deploy <job> --image=<image>:<sha> --env-vars-file --set-secrets|--clear-secrets` (fails before anything changes if the image wasn't built)
+   - then `artifacts docker tags add <image>:<sha> <image>:deployed` (RUN-05): moves the image name's `deployed` tag to what the job now runs. Flows sharing an image (cmems `map`) share the tag; they deploy the same commit.
 2. `workflows deploy <wf> --source=etl/workflow.yaml --env-vars-file`. `etl-deploy` checks this repo out at its own commit (OIDC `job_workflow_sha`).
 3. `scheduler jobs create|update http`, once per instance.
 4. **Orphans (RUN-04),** right after the schedulers:
@@ -166,7 +167,6 @@ Workflow etl/workflow.yaml (generic, one per flow)
      - anything else (day-of-week/month, names, ranges) needs `heartbeat_window` or `heartbeat: false`, otherwise the deploy fails
      - with several instances, the smallest window wins
    - The policy is created only once the metric exists, i.e. from the second deploy on, so a metric with no data yet can't raise a false alarm.
-6. **`:deployed` tag (RUN-05),** last, so only after every step above succeeded (never on `dry_run`): moves `<image>:deployed` to the digest of `<image>:<sha>`. The tag is per image name, so flows sharing an image (cmems `map`) share it: it keeps only the most recent deploy of that image.
 
 **RUN-05 (Artifact Registry):**
 - `etl-build` sets the cleanup policy once, when it creates `<repo>-<env>` ([`etl/ar-cleanup-policy.json`](../etl/ar-cleanup-policy.json)):
@@ -178,6 +178,7 @@ Workflow etl/workflow.yaml (generic, one per flow)
 - Existing repos get it from the one-off `etl/ar_cleanup.py PROJECT REGION live.json [--apply]`.
   - It is a **dry run by default**: it lists, per repo, what the policy would delete.
   - With `--apply` it also adds a Keep rule for every image a live Cloud Run job or service runs.
+  - Repos whose policy predates `keep-deployed` need it re-applied (`--apply`); `etl-build` only sets the policy at creation.
 
 Self-check: `python3 etl/test_render.py` (needs `yq`). Proof mode: `python3 etl/test_render.py live.json`.
 
