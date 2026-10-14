@@ -213,7 +213,11 @@ def main():
     cond, argument = yq('[.. | select(tag == "!!map" and has("start_next")) | .start_next.switch[0]'
                         ' | (.condition, .steps[0].create_next_execution.args.body.argument)]',
                         os.path.join(HERE, "workflow.yaml"))
-    assert 'default(map.get(input, "chain"), true) != false' in cond, cond
+    assert cond == '${next_workflow != "none" and chain}', cond
+    init = yq('.main.steps[0].init.assign', os.path.join(HERE, "workflow.yaml"))
+    assert {"chain": '${default(map.get(input, "chain"), true)}'} in init, init
+    assert yq('.main.steps[1].check_chain.switch[0].condition', os.path.join(HERE, "workflow.yaml")) \
+        == '${get_type(chain) != "boolean"}'
     assert argument == '${json.encode_to_string(map.delete(input, "chain"))}', argument
     print("ok")
 

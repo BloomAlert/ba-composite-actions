@@ -124,7 +124,7 @@ Workflow etl/workflow.yaml (generic, one per flow)
    for attempt in 1..RETRY_COUNT+1:  jobs.run(JOB_NAME, containerOverrides[0].args = args)
       failure → ba-ops-notify job_failed (then sleep RETRY_BACKOFF_SECONDS)
    all attempts failed → raise
-   success → ba-ops-notify job_succeeded; then, if NEXT_WORKFLOW and argument.chain != false,
+   success → ba-ops-notify job_succeeded; then, if NEXT_WORKFLOW and argument.chain (default true; non-bool → raise at start),
              executions.create(same argument minus "chain", same labels)
 ```
 
