@@ -40,6 +40,8 @@ def heartbeat_window(decl):
         if not 3600 <= w <= 90000:
             die("heartbeat_window must be 1h..25h (the Cloud Monitoring alignment limit)")
         return w
+    if not decl.get("instances"):
+        die("no instances (event-driven flow): set `heartbeat_window: <1h..25h>` or `heartbeat: false`")
     windows = []
     for inst in decl["instances"]:
         f = inst["schedule"].split()
@@ -108,20 +110,25 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
     declared = {"jobs": {job_name}, "workflows": {wf_name}, "schedulers": set()}
     replaced = {k: set() for k in KINDS}
     schedulers = []
-    for inst in decl["instances"]:
+
+    def replace(owner, names):
+        for r in names:
+            n = r.replace("{env}", env)
+            kinds = [k for k in KINDS if n in live_names[k]]
+            if not kinds:
+                die(f"{owner}: replaces {n}, which doesn't exist (already deleted? drop it)")
+            for k in kinds:
+                replaced[k].add(n)
+
+    replace("flow", decl.get("replaces", []))  # legacy resources superseded by the flow as a whole
+    for inst in decl.get("instances") or []:
         if not NAME_RE.match(inst["name"]):
             die(f"instance name {inst['name']!r} must be lowercase [a-z0-9-] (label + RUN-02)")
         sched = sched_tpl.replace("{instance}", inst["name"]) + f"-{env}"
         if sched in declared["schedulers"]:
             die(f"scheduler {sched} declared twice (scheduler_name needs {{instance}} with >1 instance)")
         declared["schedulers"].add(sched)
-        for r in inst.get("replaces", []):
-            n = r.replace("{env}", env)
-            kinds = [k for k in KINDS if n in live_names[k]]
-            if not kinds:
-                die(f"instance {inst['name']}: replaces {n}, which doesn't exist (already deleted? drop it)")
-            for k in kinds:
-                replaced[k].add(n)
+        replace(f"instance {inst['name']}", inst.get("replaces", []))
         schedulers.append((inst, sched))
     if clash := sorted(n for k in KINDS for n in replaced[k] & declared[k]):
         die(f"replaces {clash}, which this flow also declares (in-place adoption needs no `replaces`)")

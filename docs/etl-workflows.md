@@ -77,7 +77,9 @@ retry: {count: 16, backoff_seconds: 1800}   # optional
 next: etl-ingestion-cmems-timeseries        # optional: Workflow (minus -<env>) started on success, same input
 heartbeat_window: 25h         # optional, 1h..25h; required when it can't be derived (below)
 heartbeat: false              # optional opt-out
-instances:                    # one Scheduler each; name = [a-z0-9-], also the `instance` label
+replaces:                     # optional RUN-04: old resources the flow as a whole supersedes ({env} substituted)
+  - etl-map-ingestion-legacy-{env}
+instances:                    # one Scheduler each; name = [a-z0-9-], also the `instance` label; may be []
   - name: chl-02
     schedule: "15 8 * * *"
     args: [--ts-id, CHL-02, --publish-arrival, --source, nrt]
@@ -86,6 +88,8 @@ instances:                    # one Scheduler each; name = [a-z0-9-], also the `
       - workflow-map-ingestion-chl-02-{env}
       - schedule-map-ingestion-chl-02-{env}
 ```
+
+A flow with `instances: []` (or none) gets a job and workflow but no scheduler: it's started by `next`, a Cloud Function or by hand. It has no schedule to derive a heartbeat from, so it needs `heartbeat_window` or `heartbeat: false`, and its legacy resources go in the flow-level `replaces`.
 
 `ENVIRONMENT` and `GCP_PROJECT_ID` are always set on the job. Each deploy sets the full env (`--env-vars-file` replaces it) and all secret refs (`--set-secrets`, or `--clear-secrets` when none are declared).
 
@@ -150,7 +154,7 @@ Workflow etl/workflow.yaml (generic, one per flow)
 3. `scheduler jobs create|update http`, once per instance.
 4. **Orphans (RUN-04),** right after the schedulers:
    - What counts as an orphan:
-     - everything named in `replaces`
+     - everything named in `replaces` (flow-level or per instance)
      - schedulers that target this flow's workflow but aren't declared (removed instances)
      - the flow's own heartbeat metric/policy when it sets `heartbeat: false`
    - ENABLED orphan schedulers are **paused**, so two schedulers never fire.
@@ -164,7 +168,7 @@ Workflow etl/workflow.yaml (generic, one per flow)
    - **The window:**
      - every N minutes or hours, or hourly: 3× the interval, at least 1h
      - daily: 25h, the alerting maximum
-     - anything else (day-of-week/month, names, ranges) needs `heartbeat_window` or `heartbeat: false`, otherwise the deploy fails
+     - no instances, or anything else (day-of-week/month, names, ranges) needs `heartbeat_window` or `heartbeat: false`, otherwise the deploy fails
      - with several instances, the smallest window wins
    - The policy is created only once the metric exists, i.e. from the second deploy on, so a metric with no data yet can't raise a false alarm.
 
