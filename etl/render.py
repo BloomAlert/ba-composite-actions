@@ -112,7 +112,7 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
     schedulers = []
 
     def replace(owner, names):
-        for r in names:
+        for r in names or []:  # `replaces:` left empty is null
             n = r.replace("{env}", env)
             kinds = [k for k in KINDS if n in live_names[k]]
             if not kinds:
@@ -120,15 +120,17 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
             for k in kinds:
                 replaced[k].add(n)
 
-    replace("flow", decl.get("replaces", []))  # legacy resources superseded by the flow as a whole
-    for inst in decl.get("instances") or []:
+    replace("flow", decl.get("replaces"))  # legacy resources superseded by the flow as a whole
+    if "instances" not in decl:  # a typo'd key must not read as "no instances" and pause every scheduler
+        die("instances is required (`instances: []` for a flow with no scheduler)")
+    for inst in decl["instances"] or []:
         if not NAME_RE.match(inst["name"]):
             die(f"instance name {inst['name']!r} must be lowercase [a-z0-9-] (label + RUN-02)")
         sched = sched_tpl.replace("{instance}", inst["name"]) + f"-{env}"
         if sched in declared["schedulers"]:
             die(f"scheduler {sched} declared twice (scheduler_name needs {{instance}} with >1 instance)")
         declared["schedulers"].add(sched)
-        replace(f"instance {inst['name']}", inst.get("replaces", []))
+        replace(f"instance {inst['name']}", inst.get("replaces"))
         schedulers.append((inst, sched))
     if clash := sorted(n for k in KINDS for n in replaced[k] & declared[k]):
         die(f"replaces {clash}, which this flow also declares (in-place adoption needs no `replaces`)")
@@ -212,7 +214,6 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
         f" --service-account={token('GCP_WORKFLOW_SERVICE_ACCOUNT')} --quiet"
         ' --env-vars-file="$ETL_OUT/workflow-env.yaml"'),
     ]
-    sched_sa = token("GCP_SCHEDULER_SERVICE_ACCOUNT")
     for inst, sched in schedulers:
         labels = {"instance": inst["name"], **({"flow": flow} if flow else {})}
         body = json.dumps({
@@ -224,7 +225,8 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
         cmds.append(
             f"gcloud scheduler jobs {action} http {sched} --location={region} --project={project}"
             f" --schedule={q(inst['schedule'])} --time-zone={q(tz)} --uri={q(url)} --http-method=POST"
-            f" --message-body={q(body)} --attempt-deadline=10m --oauth-service-account-email={sched_sa}"
+            f" --message-body={q(body)} --attempt-deadline=10m"
+            f" --oauth-service-account-email={token('GCP_SCHEDULER_SERVICE_ACCOUNT')}"  # only flows with a scheduler
             f" --{'update-' if action == 'update' else ''}headers=Content-Type=application/json")
     # RUN-04: pause old schedulers right after the new ones exist; deleting is manual, after prod is verified
     pauses = [n for k, n, state in orphans if k == "schedulers" and state == "ENABLED"]

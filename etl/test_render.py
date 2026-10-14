@@ -190,6 +190,13 @@ def main():
     assert nowin.returncode != 0 and "no instances" in nowin.stderr, nowin.stderr
     assert "flow: replaces schedule-does-not-exist-staging, which doesn't exist" in render(
         "stormglass", patch=lambda d: d.update(replaces=["schedule-does-not-exist-{env}"])).stderr
+    nosa = {k: v for k, v in SECRETS.items() if k != "GCP_SCHEDULER_SERVICE_ACCOUNT"}
+    assert render("stormglass", patch=lambda d: event(d, heartbeat=False), secrets=nosa).returncode == 0
+    assert "instances is required" in render("stormglass", patch=lambda d: d.pop("instances")).stderr
+    assert render("stormglass", patch=lambda d: d.update(replaces=None)).returncode == 0
+    evd = render("stormglass", mode="drift", patch=lambda d: event(d, heartbeat=False))
+    assert "MISSING    schedulers/" not in evd.stdout, evd.stdout
+    assert "UNDECLARED schedulers/schedule-etl-well-level-ews-staging ENABLED" in evd.stdout, evd.stdout
     assert "targets workflow workflow-etl-well-level-ews-staging" in render(
         "stormglass", patch=lambda d: d.update(replaces=["schedule-etl-well-level-ews-{env}"])).stderr
 
