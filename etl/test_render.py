@@ -176,6 +176,29 @@ def main():
     assert render("stormglass", patch=lambda d: (weekly(d), d.update(heartbeat_window="25h"))).returncode == 0
     assert render("stormglass", patch=lambda d: d["instances"][0].update(schedule="0 */6 * * *")).returncode == 0
 
+    # instances: [] (event-driven / chain-only) + flow-level replaces, orphan-detected like instance-level
+    def event(d, **kw):
+        d.update(instances=[], replaces=["etl-well-level-ews-{env}", "workflow-etl-well-level-ews-{env}",
+                                         "schedule-etl-well-level-ews-{env}"], **kw)
+    ev = render("stormglass", patch=lambda d: event(d, heartbeat_window="6h"))
+    assert "# plan: runtime 2 create, 0 update; heartbeat 1 create, 0 update; 1 pause, 4 orphans" in ev.stdout, \
+        ev.stdout + ev.stderr
+    assert not lines(ev.stdout, "gcloud scheduler jobs create") and "workflow-etl-well-level-ews-staging'" in ev.stdout
+    assert lines(ev.stdout, "gcloud scheduler jobs pause schedule-etl-well-level-ews-staging ")
+    nowin = render("stormglass", patch=event)
+    assert nowin.returncode != 0 and "no instances" in nowin.stderr, nowin.stderr
+    assert "flow: replaces schedule-does-not-exist-staging, which doesn't exist" in render(
+        "stormglass", patch=lambda d: d.update(replaces=["schedule-does-not-exist-{env}"])).stderr
+    nosa = {k: v for k, v in SECRETS.items() if k != "GCP_SCHEDULER_SERVICE_ACCOUNT"}
+    assert render("stormglass", patch=lambda d: event(d, heartbeat=False), secrets=nosa).returncode == 0
+    assert "instances is required" in render("stormglass", patch=lambda d: d.pop("instances")).stderr
+    assert render("stormglass", patch=lambda d: d.update(replaces=None)).returncode == 0
+    evd = render("stormglass", mode="drift", patch=lambda d: event(d, heartbeat=False))
+    assert "MISSING    schedulers/" not in evd.stdout, evd.stdout
+    assert "UNDECLARED schedulers/schedule-etl-well-level-ews-staging ENABLED" in evd.stdout, evd.stdout
+    assert "targets workflow workflow-etl-well-level-ews-staging" in render(
+        "stormglass", patch=lambda d: d.update(replaces=["schedule-etl-well-level-ews-{env}"])).stderr
+
     lg = render("cmems", "maps-large.yaml", live={})
     assert "doesn't exist" in lg.stderr  # replaces is checked against live
     lg = render("cmems", "maps-large.yaml", patch=lambda d: [i.pop("replaces") for i in d["instances"]])
