@@ -74,7 +74,7 @@ secrets:                      # optional: ENV_NAME: <existing Secret Manager sec
   SLACK_BOT_TOKEN: slack-bot-token-{env}   # {env} substituted
 time_zone: America/Santiago   # required here or per instance
 retry: {count: 16, backoff_seconds: 1800}   # optional
-next: etl-ingestion-cmems-timeseries        # optional: Workflow (minus -<env>) started on success, same input; per-run opt-out `"chain": false`
+next: etl-ingestion-cmems-timeseries        # optional: Workflow (minus -<env>) started on success, same input
 heartbeat_window: 25h         # optional, 1h..25h; required when it can't be derived (below)
 heartbeat: false              # optional opt-out
 instances:                    # one Scheduler each; name = [a-z0-9-], also the `instance` label
@@ -124,8 +124,7 @@ Workflow etl/workflow.yaml (generic, one per flow)
    for attempt in 1..RETRY_COUNT+1:  jobs.run(JOB_NAME, containerOverrides[0].args = args)
       failure → ba-ops-notify job_failed (then sleep RETRY_BACKOFF_SECONDS)
    all attempts failed → raise
-   success → ba-ops-notify job_succeeded; then, if NEXT_WORKFLOW and argument.chain (default true; non-bool → raise at start),
-             executions.create(same argument minus "chain", same labels)
+   success → ba-ops-notify job_succeeded; then, if NEXT_WORKFLOW and chain, executions.create(same argument, same labels)
 ```
 
 - **Labels** are native Workflows *execution* labels. Cloud Run's `jobs.run` has no per-execution labels.
