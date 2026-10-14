@@ -225,13 +225,20 @@ def main():
     inline = build.split("<<'JSON'\n", 1)[1].split("\n          JSON", 1)[0]
     assert json.loads(inline) == json.load(open(os.path.join(HERE, "ar-cleanup-policy.json")))
     # Workflows expressions have no {} map literal (gcloud deploy rejects it; found 2026-10-06 on ews staging).
-    wf = open(os.path.join(HERE, "workflow.yaml")).read()
+    wf_path = os.path.join(HERE, "workflow.yaml")
+    wf = open(wf_path).read()
     assert not re.search(r"\$\{[^}]*\{\}", wf), "map literal {} inside ${...} in workflow.yaml"
     # ALERT-01: job_failed carries entrypoint.py's ERROR line, looked up fail-soft (a lookup error never escapes)
     has_except, summary = yq('[.. | select(tag == "!!map" and has("cause_lookup")) | .cause_lookup | has("except")]'
                              ' + [.. | select(tag == "!!map" and has("post")) | .post.try.args.body.event.summary]',
-                             os.path.join(HERE, "workflow.yaml"))
+                             wf_path)
     assert has_except and summary == "${default(cause, summary)}", (has_except, summary)
+    # next: per-run opt-out "chain": false (non-bool fails fast); the next run gets the input minus "chain"
+    check, cond, argument = yq('[.. | select(tag == "!!map" and has("check_chain")) | .check_chain.switch[0].condition]'
+                               ' + [.. | select(tag == "!!map" and has("start_next")) | .start_next.switch[0]'
+                               ' | (.condition, .steps[0].create_next_execution.args.body.argument)]', wf_path)
+    assert "get_type(chain)" in check and "chain" in cond and 'map.delete(input, "chain")' in argument, \
+        (check, cond, argument)
     print("ok")
 
 

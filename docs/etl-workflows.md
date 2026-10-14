@@ -128,7 +128,7 @@ Workflow etl/workflow.yaml (generic, one per flow)
    for attempt in 1..RETRY_COUNT+1:  jobs.run(JOB_NAME, containerOverrides[0].args = args)
       failure → ba-ops-notify job_failed (then sleep RETRY_BACKOFF_SECONDS)
    all attempts failed → raise
-   success → ba-ops-notify job_succeeded; then, if NEXT_WORKFLOW, executions.create(same argument, same labels)
+   success → ba-ops-notify job_succeeded; then, if NEXT_WORKFLOW and chain, executions.create(same argument, same labels)
 ```
 
 - **Labels** are native Workflows *execution* labels. Cloud Run's `jobs.run` has no per-execution labels.
@@ -143,6 +143,9 @@ Workflow etl/workflow.yaml (generic, one per flow)
     - `execution`, `attempt`, `args`
   - Notifying is **fail-soft**: a notifier error is logged and never fails the workflow.
 - **Manual run:** `gcloud workflows run <wf> --data='{"args":["--start-dt","…"]}' --labels=instance=manual`
+- **Skip `next` for one run:** add `"chain": false` (default `true`), e.g. a maps backfill without the timeseries run:
+  `gcloud workflows run <wf> --data='{"args":["--start-dt","…"],"chain":false}' --labels=instance=manual`.
+  When the next workflow is started, `chain` is removed from its input; everything else is passed unchanged.
 
 ## Deploy steps (`dry_run` prints them only)
 

@@ -1,16 +1,19 @@
 # Generic Cloud Workflow, one per flow (RUN-01). etl-deploy sets its env from an env-vars file:
 #   GCP_PROJECT_ID, GCP_REGION, ENVIRONMENT, JOB_NAME, JOB_TIMEOUT_SECONDS, NOTIFY_URL,
 #   RETRY_COUNT (0 = no retry), RETRY_BACKOFF_SECONDS, NEXT_WORKFLOW ("none" = no chaining).
-# Input: {"args": [...], "labels": {...}}. Manual run:
+# Input: {"args": [...], "labels": {...}, "chain": bool}; "chain": false (default true) skips NEXT_WORKFLOW for this run.
+# Manual run:
 #   gcloud workflows run <name> --data='{"args":["--start-dt","2026-10-01"]}' --labels=instance=manual
 main:
   params: [input]
   steps:
     - init:
         assign:
-          - final_args_list: ${default(map.get(input, "args"), [])}
           - labels: {}  # Workflows expressions have no map literal; default in two steps
+          - input: ${default(input, labels)}  # no --data → null; map.delete (start_next) needs a map
+          - final_args_list: ${default(map.get(input, "args"), [])}
           - labels: ${default(map.get(input, "labels"), labels)}
+          - chain: ${default(map.get(input, "chain"), true)}
           - project: ${sys.get_env("GCP_PROJECT_ID")}
           - region: ${sys.get_env("GCP_REGION")}
           - job_name: ${sys.get_env("JOB_NAME")}
@@ -19,6 +22,11 @@ main:
           - next_workflow: ${sys.get_env("NEXT_WORKFLOW")}
           - err: null
           - job_op: null
+
+    - check_chain:  # fail fast: "chain": "false" must not silently start NEXT_WORKFLOW
+        switch:
+          - condition: ${get_type(chain) != "boolean"}
+            raise: ${"input.chain must be true or false, got " + json.encode_to_string(chain)}
 
     - attempts:
         for:
@@ -96,14 +104,14 @@ main:
 
     - start_next:
         switch:
-          - condition: ${next_workflow != "none"}
+          - condition: ${next_workflow != "none" and chain}
             steps:
               - create_next_execution:
                   call: googleapis.workflowexecutions.v1.projects.locations.workflows.executions.create
                   args:
                     parent: ${"projects/" + project + "/locations/" + region + "/workflows/" + next_workflow}
                     body:
-                      argument: ${json.encode_to_string(input)}
+                      argument: ${json.encode_to_string(map.delete(input, "chain"))}
                       labels: ${labels}
 
     - done:
