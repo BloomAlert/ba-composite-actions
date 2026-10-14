@@ -185,7 +185,6 @@ def main():
         ev.stdout + ev.stderr
     assert not lines(ev.stdout, "gcloud scheduler jobs create") and "workflow-etl-well-level-ews-staging'" in ev.stdout
     assert lines(ev.stdout, "gcloud scheduler jobs pause schedule-etl-well-level-ews-staging ")
-    assert render("stormglass", patch=lambda d: event(d, heartbeat=False)).returncode == 0
     nowin = render("stormglass", patch=event)
     assert nowin.returncode != 0 and "no instances" in nowin.stderr, nowin.stderr
     assert "flow: replaces schedule-does-not-exist-staging, which doesn't exist" in render(

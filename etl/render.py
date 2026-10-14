@@ -40,7 +40,7 @@ def heartbeat_window(decl):
         if not 3600 <= w <= 90000:
             die("heartbeat_window must be 1h..25h (the Cloud Monitoring alignment limit)")
         return w
-    if not decl.get("instances"):
+    if not decl["instances"]:
         die("no instances (event-driven flow): set `heartbeat_window: <1h..25h>` or `heartbeat: false`")
     windows = []
     for inst in decl["instances"]:
@@ -65,6 +65,9 @@ def heartbeat_window(decl):
 
 
 def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
+    if "instances" not in decl:  # a typo'd key must not read as "no instances" and pause every scheduler
+        die("instances is required (`instances: []` for a flow with no scheduler)")
+    decl["instances"] = decl["instances"] or []  # `instances:` left empty is null
     secret_env = {}  # values that come from `secrets`: the plan only references them as $S_<NAME>
 
     def need(name):
@@ -121,9 +124,7 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
                 replaced[k].add(n)
 
     replace("flow", decl.get("replaces"))  # legacy resources superseded by the flow as a whole
-    if "instances" not in decl:  # a typo'd key must not read as "no instances" and pause every scheduler
-        die("instances is required (`instances: []` for a flow with no scheduler)")
-    for inst in decl["instances"] or []:
+    for inst in decl["instances"]:
         if not NAME_RE.match(inst["name"]):
             die(f"instance name {inst['name']!r} must be lowercase [a-z0-9-] (label + RUN-02)")
         sched = sched_tpl.replace("{instance}", inst["name"]) + f"-{env}"
