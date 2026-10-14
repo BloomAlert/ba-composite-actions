@@ -209,6 +209,12 @@ def main():
                              ' + [.. | select(tag == "!!map" and has("post")) | .post.try.args.body.event.summary]',
                              os.path.join(HERE, "workflow.yaml"))
     assert has_except and summary == "${default(cause, summary)}", (has_except, summary)
+    # next: per-run opt-out "chain": false; the next run gets the input minus "chain"
+    cond, argument = yq('[.. | select(tag == "!!map" and has("start_next")) | .start_next.switch[0]'
+                        ' | (.condition, .steps[0].create_next_execution.args.body.argument)]',
+                        os.path.join(HERE, "workflow.yaml"))
+    assert 'default(map.get(input, "chain"), true) != false' in cond, cond
+    assert argument == '${json.encode_to_string(map.delete(input, "chain"))}', argument
     print("ok")
 
 

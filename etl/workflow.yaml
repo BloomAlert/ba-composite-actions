@@ -1,7 +1,8 @@
 # Generic Cloud Workflow, one per flow (RUN-01). etl-deploy sets its env from an env-vars file:
 #   GCP_PROJECT_ID, GCP_REGION, ENVIRONMENT, JOB_NAME, JOB_TIMEOUT_SECONDS, NOTIFY_URL,
 #   RETRY_COUNT (0 = no retry), RETRY_BACKOFF_SECONDS, NEXT_WORKFLOW ("none" = no chaining).
-# Input: {"args": [...], "labels": {...}}. Manual run:
+# Input: {"args": [...], "labels": {...}, "chain": bool}; "chain": false (default true) skips NEXT_WORKFLOW for this run.
+# Manual run:
 #   gcloud workflows run <name> --data='{"args":["--start-dt","2026-10-01"]}' --labels=instance=manual
 main:
   params: [input]
@@ -96,14 +97,15 @@ main:
 
     - start_next:
         switch:
-          - condition: ${next_workflow != "none"}
+          # per-run opt-out; the next run gets the same input minus "chain" (map.delete returns a copy)
+          - condition: ${next_workflow != "none" and default(map.get(input, "chain"), true) != false}
             steps:
               - create_next_execution:
                   call: googleapis.workflowexecutions.v1.projects.locations.workflows.executions.create
                   args:
                     parent: ${"projects/" + project + "/locations/" + region + "/workflows/" + next_workflow}
                     body:
-                      argument: ${json.encode_to_string(input)}
+                      argument: ${json.encode_to_string(map.delete(input, "chain"))}
                       labels: ${labels}
 
     - done:
