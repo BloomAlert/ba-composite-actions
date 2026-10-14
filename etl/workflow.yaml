@@ -135,7 +135,8 @@ notify:
               - execution_link:
                   assign:
                     - parts: ${text.split(execution, "/")}
-                    - log_uri: ${console + "executions/details/" + region + "/" + parts[len(parts) - 1] + "/logs?project=" + project}
+                    - execution_id: ${parts[len(parts) - 1]}
+                    - log_uri: ${console + "executions/details/" + region + "/" + execution_id + "/logs?project=" + project}
               - exit_code_lookup:  # success is exit 0 by definition
                   switch:
                     - condition: ${event_type == "job_failed"}
@@ -173,7 +174,7 @@ notify:
                                               body:
                                                 resourceNames:
                                                   - ${"projects/" + project}
-                                                filter: '${"resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"" + job_name + "\" AND labels.\"run.googleapis.com/execution_name\"=\"" + parts[len(parts) - 1] + "\" AND severity>=ERROR AND jsonPayload.exit_code:* AND timestamp>=\"" + time.format(sys.now() - 86400) + "\""}'
+                                                filter: '${"resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"" + job_name + "\" AND labels.\"run.googleapis.com/execution_name\"=\"" + execution_id + "\" AND severity>=ERROR AND jsonPayload.exit_code:* AND timestamp>=\"" + time.format(sys.now() - 86400) + "\""}'
                                                 orderBy: timestamp desc
                                                 pageSize: 1
                                             result: log_page
@@ -181,6 +182,8 @@ notify:
                                             switch:
                                               - condition: ${"entries" in log_page}
                                                 next: keep_cause
+                                              - condition: ${lookup == 3}  # no sleep after the last try
+                                                next: break
                                         - wait_for_logs:
                                             call: sys.sleep
                                             args:
@@ -190,8 +193,13 @@ notify:
                                         - keep_cause:  # the message minus a traceback, capped for Slack
                                             assign:
                                               - cause: ${text.split(log_page.entries[0].jsonPayload.message, "\nTraceback")[0]}
-                                        - cap_cause:
+                                        - cap_cause:  # an empty cause falls back to the summary too
                                             switch:
+                                              - condition: ${cause == ""}
+                                                steps:
+                                                  - drop_empty:
+                                                      assign:
+                                                        - cause: null
                                               - condition: ${len(cause) > 500}
                                                 steps:
                                                   - truncate:
