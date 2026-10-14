@@ -164,49 +164,40 @@ notify:
                             try:
                               steps:
                                 - poll_logs:  # stdout reaches Cloud Logging a few seconds after the exit
+                                    # ponytail: a repo not on entrypoint.py never matches, so its alert waits all 3 tries
+                                    # (~15 s); gate on a label if that delay matters before the fleet migrates
                                     for:
                                       value: lookup
                                       range: [1, 3]
                                       steps:
+                                        - wait_for_logs:
+                                            call: sys.sleep
+                                            args:
+                                              seconds: 5
                                         - list_entries:
                                             call: googleapis.logging.v2.entries.list
                                             args:
                                               body:
                                                 resourceNames:
                                                   - ${"projects/" + project}
-                                                filter: '${"resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"" + job_name + "\" AND labels.\"run.googleapis.com/execution_name\"=\"" + execution_id + "\" AND severity>=ERROR AND jsonPayload.exit_code:* AND timestamp>=\"" + time.format(sys.now() - 86400) + "\""}'
+                                                filter: '${"resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"" + job_name + "\" AND labels.\"run.googleapis.com/execution_name\"=\"" + execution_id + "\" AND severity>=ERROR AND jsonPayload.exit_code:* AND timestamp>=\"" + time.format(sys.now() - 3600) + "\""}'
                                                 orderBy: timestamp desc
                                                 pageSize: 1
                                             result: log_page
-                                        - found:
+                                        - found:  # the message minus a traceback
                                             switch:
                                               - condition: ${"entries" in log_page}
-                                                next: keep_cause
-                                              - condition: ${lookup == 3}  # no sleep after the last try
+                                                assign:
+                                                  - cause: ${text.split(log_page.entries[0].jsonPayload.message, "\nTraceback")[0]}
                                                 next: break
-                                        - wait_for_logs:
-                                            call: sys.sleep
-                                            args:
-                                              seconds: 10
-                                        - next_lookup:
-                                            next: continue
-                                        - keep_cause:  # the message minus a traceback, capped for Slack
-                                            assign:
-                                              - cause: ${text.split(log_page.entries[0].jsonPayload.message, "\nTraceback")[0]}
-                                        - cap_cause:  # an empty cause falls back to the summary too
-                                            switch:
-                                              - condition: ${cause == ""}
-                                                steps:
-                                                  - drop_empty:
-                                                      assign:
-                                                        - cause: null
-                                              - condition: ${len(cause) > 500}
-                                                steps:
-                                                  - truncate:
-                                                      assign:
-                                                        - cause: ${text.substring(cause, 0, 497) + "..."}
-                                        - stop:
-                                            next: break
+                                - cap_cause:  # capped for Slack; an empty cause falls back to the summary too
+                                    switch:
+                                      - condition: ${cause == ""}
+                                        assign:
+                                          - cause: null
+                                      - condition: ${len(default(cause, "")) > 500}
+                                        assign:
+                                          - cause: ${text.substring(cause, 0, 497) + "..."}
                             except:
                               as: ignored
                               steps:

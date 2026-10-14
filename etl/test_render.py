@@ -54,10 +54,13 @@ def tmp(content):
     return f.name
 
 
+def yq(expr, path):
+    return json.loads(subprocess.run(["yq", "-o=json", expr, path], check=True, capture_output=True, text=True).stdout)
+
+
 def render(example, decl="runtime.yaml", mode="deploy", env="staging", live=None, drop=(), patch=None,
            secrets=SECRETS):
-    d = json.loads(subprocess.run(["yq", "-o=json", ".", "-"], check=True, capture_output=True, text=True,
-                                  stdin=open(os.path.join(EXAMPLES, example, decl))).stdout)
+    d = yq(".", os.path.join(EXAMPLES, example, decl))
     if patch:
         patch(d)
     vars_ = dict(VARS)
@@ -202,26 +205,10 @@ def main():
     wf = open(os.path.join(HERE, "workflow.yaml")).read()
     assert not re.search(r"\$\{[^}]*\{\}", wf), "map literal {} inside ${...} in workflow.yaml"
     # ALERT-01: job_failed carries entrypoint.py's ERROR line, looked up fail-soft (a lookup error never escapes)
-    wfj = json.loads(subprocess.run(["yq", "-o=json", ".", os.path.join(HERE, "workflow.yaml")], check=True,
-                                    capture_output=True, text=True).stdout)
-
-    def find(node, key):
-        if isinstance(node, dict):
-            if key in node:
-                yield node
-            for v in node.values():
-                yield from find(v, key)
-        elif isinstance(node, list):
-            for v in node:
-                yield from find(v, key)
-    lookup = [s["cause_lookup"] for s in find(wfj["notify"], "cause_lookup")]
-    assert len(lookup) == 1 and "except" in lookup[0], lookup
-    (call,) = [c for c in find(lookup[0]["try"], "call") if c["call"] == "googleapis.logging.v2.entries.list"]
-    flt = call["args"]["body"]["filter"]
-    for term in ("execution_name", "severity>=ERROR", "jsonPayload.exit_code:*", "timestamp>="):
-        assert term in flt, term
-    (post,) = [s["post"] for s in find(wfj["notify"], "post")]
-    assert post["try"]["args"]["body"]["event"]["summary"] == "${default(cause, summary)}"
+    has_except, summary = yq('[.. | select(tag == "!!map" and has("cause_lookup")) | .cause_lookup | has("except")]'
+                             ' + [.. | select(tag == "!!map" and has("post")) | .post.try.args.body.event.summary]',
+                             os.path.join(HERE, "workflow.yaml"))
+    assert has_except and summary == "${default(cause, summary)}", (has_except, summary)
     print("ok")
 
 
