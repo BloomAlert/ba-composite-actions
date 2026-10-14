@@ -131,7 +131,7 @@ Workflow etl/workflow.yaml (generic, one per flow)
 - **Events** use ba-ops-notify's typed v2 format: `{schema_version: 2, source: {job_name, gcp_project_id, gcp_region, environment}, event: {...}}`. The `event` has:
   - `event_type`: `job_failed` or `job_succeeded`
   - `severity`: `ERROR` or `INFO`
-  - `title`, and `summary` (the error message)
+  - `title`, and `summary`. On failure it is the cause (ALERT-01): the execution's ERROR line logged by etl-template's `src/shared/entrypoint.py` (`jsonPayload.exit_code` set), read from Cloud Logging, traceback dropped, capped at 500 characters. The lookup polls up to 3 times, 10 s apart (log ingestion lag). If it finds nothing or fails (e.g. a repo not on `entrypoint.py` yet, or no `roles/logging.viewer`), the summary is the Cloud Run error message, as before.
   - `log_uri`: the execution's console logs
   - `context`: the instance labels, plus:
     - `exit_code`: on failure, the first task's `lastAttemptResult.exitCode`; `0` on success
@@ -197,6 +197,6 @@ It needs names only, not values.
 |---|---|
 | deploy | `roles/artifactregistry.writer` on `<repo>-<env>` (`tags add` needs `artifactregistry.tags.create`/`.update`), `roles/run.developer`, `roles/workflows.editor`, `roles/cloudscheduler.admin` (pause included), `roles/logging.configWriter`, `roles/monitoring.alertPolicyEditor`, `roles/iam.serviceAccountUser` on the job, workflow and scheduler SAs. Possibly also `roles/monitoring.notificationChannelViewer`, if attaching the channel needs `notificationChannels.get` |
 | drift (read-only) | `roles/run.viewer`, `roles/workflows.viewer`, `roles/cloudscheduler.viewer`, `roles/logging.viewer` (metrics list), `roles/monitoring.viewer` |
-| workflow | what it has today (`run.jobs.runWithOverrides`, `run.invoker` on ba-ops-notify), plus `roles/run.viewer` (`tasks.list` for the exit code) and `roles/workflows.invoker` (`next`) |
+| workflow | what it has today (`run.jobs.runWithOverrides`, `run.invoker` on ba-ops-notify), plus `roles/run.viewer` (`tasks.list` for the exit code), `roles/workflows.invoker` (`next`) and `roles/logging.viewer` (`logEntries.list` for the cause) |
 | build | `roles/artifactregistry.writer`, plus `artifactregistry.repositories.create` and `.update` (set the policy at creation; `repoAdmin` lacks `update`) |
 | `ar_cleanup.py` operator | `roles/artifactregistry.reader` + `roles/run.viewer` for the dry run; `roles/artifactregistry.admin` to `--apply` |

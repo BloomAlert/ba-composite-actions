@@ -201,6 +201,27 @@ def main():
     # Workflows expressions have no {} map literal (gcloud deploy rejects it; found 2026-10-06 on ews staging).
     wf = open(os.path.join(HERE, "workflow.yaml")).read()
     assert not re.search(r"\$\{[^}]*\{\}", wf), "map literal {} inside ${...} in workflow.yaml"
+    # ALERT-01: job_failed carries entrypoint.py's ERROR line, looked up fail-soft (a lookup error never escapes)
+    wfj = json.loads(subprocess.run(["yq", "-o=json", ".", os.path.join(HERE, "workflow.yaml")], check=True,
+                                    capture_output=True, text=True).stdout)
+
+    def find(node, key):
+        if isinstance(node, dict):
+            if key in node:
+                yield node
+            for v in node.values():
+                yield from find(v, key)
+        elif isinstance(node, list):
+            for v in node:
+                yield from find(v, key)
+    lookup = [s["cause_lookup"] for s in find(wfj["notify"], "cause_lookup")]
+    assert len(lookup) == 1 and "except" in lookup[0], lookup
+    (call,) = [c for c in find(lookup[0]["try"], "call") if c["call"] == "googleapis.logging.v2.entries.list"]
+    flt = call["args"]["body"]["filter"]
+    for term in ("execution_name", "severity>=ERROR", "jsonPayload.exit_code:*", "timestamp>="):
+        assert term in flt, term
+    (post,) = [s["post"] for s in find(wfj["notify"], "post")]
+    assert post["try"]["args"]["body"]["event"]["summary"] == "${default(cause, summary)}"
     print("ok")
 
 
