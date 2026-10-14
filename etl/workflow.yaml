@@ -182,21 +182,24 @@ notify:
                                             call: sys.sleep
                                             args:
                                               seconds: 5
-                                        - list_entries:
-                                            call: googleapis.logging.v2.entries.list
+                                        - list_entries:  # no Workflows connector for Logging; plain REST
+                                            call: http.post
                                             args:
+                                              url: https://logging.googleapis.com/v2/entries:list
+                                              auth:
+                                                type: OAuth2
                                               body:
                                                 resourceNames:
                                                   - ${"projects/" + project}
                                                 filter: '${"resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"" + job_name + "\" AND labels.\"run.googleapis.com/execution_name\"=\"" + execution_id + "\" AND severity>=ERROR AND jsonPayload.exit_code:* AND timestamp>=\"" + time.format(sys.now() - 3600) + "\""}'
                                                 orderBy: timestamp desc
                                                 pageSize: 1
-                                            result: log_page
+                                            result: log_resp
                                         - found:  # the message minus a traceback
                                             switch:
-                                              - condition: ${"entries" in log_page}
+                                              - condition: ${"entries" in log_resp.body}
                                                 assign:
-                                                  - cause: ${text.split(log_page.entries[0].jsonPayload.message, "\nTraceback")[0]}
+                                                  - cause: ${text.split(log_resp.body.entries[0].jsonPayload.message, "\nTraceback")[0]}
                                                 next: break
                                 - cap_cause:  # capped for Slack; an empty cause falls back to the summary too
                                     switch:
