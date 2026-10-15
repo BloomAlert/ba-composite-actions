@@ -125,7 +125,7 @@ The render **fails** when:
 Scheduler (per instance) ── POST …/workflows/<wf>/executions
    {"argument": "{\"args\":[…],\"labels\":{\"instance\":…[,\"flow\":…]}}", "labels": {"instance": …}}
 Workflow etl/workflow.yaml (generic, one per flow)
-   for attempt in 1..RETRY_COUNT+1:  jobs.run(JOB_NAME, containerOverrides[0].args = args)
+   for attempt in 1..min(retry, RETRY_COUNT)+1:  jobs.run(JOB_NAME, containerOverrides[0].args = args)
       failure → ba-ops-notify job_failed (then sleep RETRY_BACKOFF_SECONDS)
    all attempts failed → raise
    success → ba-ops-notify job_succeeded; then, if NEXT_WORKFLOW and chain, executions.create(same argument, same labels)
@@ -145,7 +145,11 @@ Workflow etl/workflow.yaml (generic, one per flow)
 - **Manual run:** `gcloud workflows run <wf> --data='{"args":["--start-dt","…"]}' --labels=instance=manual`
 - **Skip `next` for one run:** add `"chain": false` (default `true`), e.g. a maps backfill without the timeseries run:
   `gcloud workflows run <wf> --data='{"args":["--start-dt","…"],"chain":false}' --labels=instance=manual`.
-  When the next workflow is started, `chain` is removed from its input; everything else is passed unchanged.
+  When the next workflow is started, `chain` and `retry` are removed from its input; everything else is passed unchanged.
+- **Fewer retries for one run:** add `"retry": n` (integer >= 0) to use at most `n` retries instead of `RETRY_COUNT`, e.g. `"retry": 0` for a manual run that should fail once, not retry 16 times.
+  - It can only lower retries: values above `RETRY_COUNT` are clamped to it.
+  - Fail-soft: a non-integer or negative value is ignored (`RETRY_COUNT` applies) and logged as a WARNING in the execution's logs.
+  - Without `retry`, behavior is unchanged. Workflows deployed from v1.3.1 or earlier ignore the key, so callers can send it before they upgrade. But v1.3.1 forwards it to `next`, where a newer workflow would apply it.
 
 ## Deploy steps (`dry_run` prints them only)
 
