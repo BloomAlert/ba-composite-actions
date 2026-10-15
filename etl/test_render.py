@@ -239,12 +239,11 @@ def main():
                                ' | (.condition, .steps[0].create_next_execution.args.body.argument)]', wf_path)
     assert "get_type(chain)" in check and "chain" in cond and 'map.delete(map.delete(input, "chain"), "retry")' in argument, \
         (check, cond, argument)
-    # per-run "retry": n lowers max_attempts only (never raises it); bad values fall through to a log, not a raise
-    # order matters: null, then type, before any comparison (a string compared to 0 raises)
-    conds, nxt = yq('[.. | select(tag == "!!map" and has("override_retry")) | .override_retry]'
-                    ' | .[0] | [[.switch[].condition], .next]', wf_path)
-    assert conds == ['${retry == null}', '${get_type(retry) != "integer"}', '${retry < 0}',
-                     '${retry < max_attempts - 1}'] and nxt == "attempts", (conds, nxt)
+    conds, clamp, nxt = yq('[[.. | select(tag == "!!map" and has("override_retry")) | .override_retry.switch[].condition]]'
+                           ' + [.. | select(tag == "!!map" and has("clamp_retry")) | .clamp_retry'
+                           ' | (.assign[0].max_attempts, .next)]', wf_path)
+    assert conds == ['${retry == null}', '${get_type(retry) != "integer"}', '${retry < 0}'] \
+        and clamp == "${math.min(retry, max_attempts - 1) + 1}" and nxt == "attempts", (conds, clamp, nxt)
     print("ok")
 
 

@@ -38,9 +38,9 @@ main:
             next: log_bad_retry
           - condition: ${retry < 0}
             next: log_bad_retry
-          - condition: ${retry < max_attempts - 1}  # no arithmetic on input: retry + 1 could overflow int64
-            assign:
-              - max_attempts: ${retry + 1}
+    - clamp_retry:  # min before +1: retry + 1 could overflow int64
+        assign:
+          - max_attempts: ${math.min(retry, max_attempts - 1) + 1}
         next: attempts
     - log_bad_retry:
         call: sys.log
