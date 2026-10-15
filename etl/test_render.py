@@ -237,8 +237,13 @@ def main():
     check, cond, argument = yq('[.. | select(tag == "!!map" and has("check_chain")) | .check_chain.switch[0].condition]'
                                ' + [.. | select(tag == "!!map" and has("start_next")) | .start_next.switch[0]'
                                ' | (.condition, .steps[0].create_next_execution.args.body.argument)]', wf_path)
-    assert "get_type(chain)" in check and "chain" in cond and 'map.delete(input, "chain")' in argument, \
+    assert "get_type(chain)" in check and "chain" in cond and 'map.delete(map.delete(input, "chain"), "retry")' in argument, \
         (check, cond, argument)
+    conds, clamp, nxt = yq('[[.. | select(tag == "!!map" and has("override_retry")) | .override_retry.switch[].condition]]'
+                           ' + [.. | select(tag == "!!map" and has("clamp_retry")) | .clamp_retry'
+                           ' | (.assign[0].max_attempts, .next)]', wf_path)
+    assert conds == ['${retry == null}', '${get_type(retry) != "integer"}', '${retry < 0}'] \
+        and clamp == "${math.min(retry, max_attempts - 1) + 1}" and nxt == "attempts", (conds, clamp, nxt)
     print("ok")
 
 

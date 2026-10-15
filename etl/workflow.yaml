@@ -1,7 +1,8 @@
 # Generic Cloud Workflow, one per flow (RUN-01). etl-deploy sets its env from an env-vars file:
 #   GCP_PROJECT_ID, GCP_REGION, ENVIRONMENT, JOB_NAME, JOB_TIMEOUT_SECONDS, NOTIFY_URL,
 #   RETRY_COUNT (0 = no retry), RETRY_BACKOFF_SECONDS, NEXT_WORKFLOW ("none" = no chaining).
-# Input: {"args": [...], "labels": {...}, "chain": bool}; "chain": false (default true) skips NEXT_WORKFLOW for this run.
+# Input: {"args": [...], "labels": {...}, "chain": bool, "retry": int}; "chain": false (default true) skips NEXT_WORKFLOW
+# for this run; "retry": n lowers RETRY_COUNT for this run only (clamped to it; invalid -> ignored and logged).
 # Manual run:
 #   gcloud workflows run <name> --data='{"args":["--start-dt","2026-10-01"]}' --labels=instance=manual
 main:
@@ -14,6 +15,7 @@ main:
           - final_args_list: ${default(map.get(input, "args"), [])}
           - labels: ${default(map.get(input, "labels"), labels)}
           - chain: ${default(map.get(input, "chain"), true)}
+          - retry: ${map.get(input, "retry")}
           - project: ${sys.get_env("GCP_PROJECT_ID")}
           - region: ${sys.get_env("GCP_REGION")}
           - job_name: ${sys.get_env("JOB_NAME")}
@@ -27,6 +29,24 @@ main:
         switch:
           - condition: ${get_type(chain) != "boolean"}
             raise: ${"input.chain must be true or false, got " + json.encode_to_string(chain)}
+
+    - override_retry:  # fail-soft: a bad value keeps RETRY_COUNT; a run can lower retries, never raise them
+        switch:
+          - condition: ${retry == null}
+            next: attempts
+          - condition: ${get_type(retry) != "integer"}  # separate conditions: `or` would compare a string to 0
+            next: log_bad_retry
+          - condition: ${retry < 0}
+            next: log_bad_retry
+    - clamp_retry:  # min before +1: retry + 1 could overflow int64
+        assign:
+          - max_attempts: ${math.min(retry, max_attempts - 1) + 1}
+        next: attempts
+    - log_bad_retry:
+        call: sys.log
+        args:
+          severity: WARNING
+          text: ${"input.retry ignored, must be an integer >= 0, got " + json.encode_to_string(retry)}
 
     - attempts:
         for:
@@ -111,7 +131,7 @@ main:
                   args:
                     parent: ${"projects/" + project + "/locations/" + region + "/workflows/" + next_workflow}
                     body:
-                      argument: ${json.encode_to_string(map.delete(input, "chain"))}
+                      argument: ${json.encode_to_string(map.delete(map.delete(input, "chain"), "retry"))}
                       labels: ${labels}
 
     - done:
