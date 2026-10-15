@@ -237,12 +237,14 @@ def main():
     check, cond, argument = yq('[.. | select(tag == "!!map" and has("check_chain")) | .check_chain.switch[0].condition]'
                                ' + [.. | select(tag == "!!map" and has("start_next")) | .start_next.switch[0]'
                                ' | (.condition, .steps[0].create_next_execution.args.body.argument)]', wf_path)
-    assert "get_type(chain)" in check and "chain" in cond and '"chain"), "retry")' in argument, \
+    assert "get_type(chain)" in check and "chain" in cond and 'map.delete(map.delete(input, "chain"), "retry")' in argument, \
         (check, cond, argument)
     # per-run "retry": n lowers max_attempts only (never raises it); bad values fall through to a log, not a raise
+    # order matters: null, then type, before any comparison (a string compared to 0 raises)
     conds, nxt = yq('[.. | select(tag == "!!map" and has("override_retry")) | .override_retry]'
-                    ' | .[0] | [([.switch[].condition] | join(" | ")), .next]', wf_path)
-    assert "retry + 1 < max_attempts" in conds and nxt == "attempts", (conds, nxt)
+                    ' | .[0] | [[.switch[].condition], .next]', wf_path)
+    assert conds == ['${retry == null}', '${get_type(retry) != "integer"}', '${retry < 0}',
+                     '${retry < max_attempts - 1}'] and nxt == "attempts", (conds, nxt)
     print("ok")
 
 
