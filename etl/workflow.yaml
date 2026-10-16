@@ -84,7 +84,22 @@ main:
                 switch:
                   - condition: ${err == null}
                     next: break
-            - notify_failure:
+            - retry_or_notify:  # one job_failed per run, like the legacy workflows; earlier attempts only log
+                # (the Cloud Run error message carries the exit code: "Task … failed with exit code: 1 …")
+                switch:
+                  - condition: ${attempt < max_attempts}
+                    steps:
+                      - log_failed_attempt:
+                          call: sys.log
+                          args:
+                            severity: WARNING
+                            text: '${"attempt " + string(attempt) + "/" + string(max_attempts) + " failed, retrying in " + string(backoff) + " s (" + default(map.get(err, ["operation", "metadata", "name"]), "not started") + "): " + default(map.get(err, ["operation", "error", "message"]), json.encode_to_string(err))}'
+                      - sleep:
+                          call: sys.sleep
+                          args:
+                            seconds: ${backoff}
+                          next: continue
+            - notify_failure:  # last attempt: the alert carries its exit code/class and attempt n/n
                 call: notify
                 args:
                   event_type: job_failed
@@ -95,14 +110,6 @@ main:
                   extra:
                     attempt: ${string(attempt) + "/" + string(max_attempts)}
                     args: ${json.encode_to_string(final_args_list)}
-            - wait_before_retry:
-                switch:
-                  - condition: ${attempt < max_attempts}
-                    steps:
-                      - sleep:
-                          call: sys.sleep
-                          args:
-                            seconds: ${backoff}
 
     - give_up:
         switch:
