@@ -23,6 +23,7 @@ main:
           - backoff: ${int(sys.get_env("RETRY_BACKOFF_SECONDS"))}
           - next_workflow: ${sys.get_env("NEXT_WORKFLOW")}
           - err: null
+          - execution: null  # the failed attempt's Execution, if it started
           - job_op: null
 
     - check_chain:  # fail fast: "chain": "false" must not silently start NEXT_WORKFLOW
@@ -80,25 +81,22 @@ main:
                     - keep_error:
                         assign:
                           - err: ${e}
+                          # connectors raise OperationError carrying the failed LRO, whose metadata is the Execution
+                          - execution: ${map.get(e, ["operation", "metadata", "name"])}
             - succeeded:
                 switch:
                   - condition: ${err == null}
                     next: break
-            - notify_failure:
-                call: notify
-                args:
-                  event_type: job_failed
-                  # connectors raise OperationError carrying the failed LRO, whose metadata is the Execution
-                  execution: ${map.get(err, ["operation", "metadata", "name"])}
-                  summary: ${default(map.get(err, "message"), json.encode_to_string(err))}
-                  labels: ${labels}
-                  extra:
-                    attempt: ${string(attempt) + "/" + string(max_attempts)}
-                    args: ${json.encode_to_string(final_args_list)}
-            - wait_before_retry:
+            - wait_before_retry:  # only the last attempt notifies (give_up); earlier ones log a WARNING
+                # (the Cloud Run error message carries the exit code: "Task … failed with exit code: 1 …")
                 switch:
                   - condition: ${attempt < max_attempts}
                     steps:
+                      - log_failed_attempt:
+                          call: sys.log
+                          args:
+                            severity: WARNING
+                            text: '${"attempt " + string(attempt) + "/" + string(max_attempts) + " failed, retrying in " + string(backoff) + " s (" + default(execution, "not started") + "): " + default(map.get(err, ["operation", "error", "message"]), json.encode_to_string(err))}'
                       - sleep:
                           call: sys.sleep
                           args:
@@ -108,6 +106,16 @@ main:
         switch:
           - condition: ${err != null}
             steps:
+              - notify_failure:  # every attempt failed: attempt is max/max (the loop variable is local to it)
+                  call: notify
+                  args:
+                    event_type: job_failed
+                    execution: ${execution}
+                    summary: ${default(map.get(err, "message"), json.encode_to_string(err))}
+                    labels: ${labels}
+                    extra:
+                      attempt: ${string(max_attempts) + "/" + string(max_attempts)}
+                      args: ${json.encode_to_string(final_args_list)}
               - reraise:
                   raise: ${err}
 

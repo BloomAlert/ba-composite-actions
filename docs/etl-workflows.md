@@ -126,8 +126,8 @@ Scheduler (per instance) ── POST …/workflows/<wf>/executions
    {"argument": "{\"args\":[…],\"labels\":{\"instance\":…[,\"flow\":…]}}", "labels": {"instance": …}}
 Workflow etl/workflow.yaml (generic, one per flow)
    for attempt in 1..min(retry ?? RETRY_COUNT, RETRY_COUNT)+1:  jobs.run(JOB_NAME, containerOverrides[0].args = args)
-      failure → ba-ops-notify job_failed (then sleep RETRY_BACKOFF_SECONDS)
-   all attempts failed → raise
+      failure, attempts left → WARNING log (attempt n/max, execution, exit code), sleep RETRY_BACKOFF_SECONDS
+   all attempts failed → ba-ops-notify job_failed (last attempt's exit code/class, attempt max/max), then raise
    success → ba-ops-notify job_succeeded; then, if NEXT_WORKFLOW and chain, executions.create(same argument, same labels)
 ```
 
@@ -141,6 +141,7 @@ Workflow etl/workflow.yaml (generic, one per flow)
     - `exit_code`: on failure, the first task's `lastAttemptResult.exitCode`; `0` on success
     - `exit_class`: APP-05 classes (0 ok, 1 bug, 2 config, 3 transient source, else unknown)
     - `execution`, `attempt`, `args`
+  - **One `job_failed` per run** (last attempt only; earlier failures log a WARNING). A run that recovers by retrying sends only `job_succeeded`, so it stays silent in Slack unless a failure thread already exists.
   - Notifying is **fail-soft**: a notifier error is logged and never fails the workflow.
 - **Manual run:** `gcloud workflows run <wf> --data='{"args":["--start-dt","…"]}' --labels=instance=manual`
 - **Skip `next` for one run:** add `"chain": false` (default `true`), e.g. a maps backfill without the timeseries run:
