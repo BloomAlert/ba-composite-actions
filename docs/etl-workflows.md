@@ -141,7 +141,7 @@ Workflow etl/workflow.yaml (generic, one per flow)
     - `exit_code`: on failure, the first task's `lastAttemptResult.exitCode`; `0` on success
     - `exit_class`: APP-05 classes (0 ok, 1 bug, 2 config, 3 transient source, else unknown)
     - `execution`, `attempt`, `args`
-  - **One `job_failed` per run**, like the legacy per-repo workflows: only when the last attempt fails (there is no non-retryable exit; every failure is retried). Earlier failed attempts are only logged as a WARNING in the execution's logs. A run that succeeds after failed attempts sends only `job_succeeded`: ba-ops-notify posts "recovered" only into a thread that is already failing, otherwise nothing (`no-thread`), so a run that recovered by retrying is silent in Slack.
+  - **One `job_failed` per run** (last attempt only; earlier failures log a WARNING). A run that recovers by retrying sends only `job_succeeded`, so it stays silent in Slack unless a failure thread already exists.
   - Notifying is **fail-soft**: a notifier error is logged and never fails the workflow.
 - **Manual run:** `gcloud workflows run <wf> --data='{"args":["--start-dt","…"]}' --labels=instance=manual`
 - **Skip `next` for one run:** add `"chain": false` (default `true`), e.g. a maps backfill without the timeseries run:

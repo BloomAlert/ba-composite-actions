@@ -244,12 +244,10 @@ def main():
                            ' | (.assign[0].max_attempts, .next)]', wf_path)
     assert conds == ['${retry == null}', '${get_type(retry) != "integer"}', '${retry < 0}'] \
         and clamp == "${math.min(retry, max_attempts - 1) + 1}" and nxt == "attempts", (conds, clamp, nxt)
-    # one job_failed per run: attempts before the last log, sleep and continue, never reaching notify_failure
-    loop = yq('[.. | select(tag == "!!map" and has("attempts")) | .attempts.for.steps[] | keys[0]]', wf_path)
-    retry_cond, retry_next = yq('[.. | select(tag == "!!map" and has("retry_or_notify")) | .retry_or_notify.switch[0]'
-                                ' | (.condition, .steps[-1].sleep.next)]', wf_path)
-    assert loop[-2:] == ["retry_or_notify", "notify_failure"] and retry_cond == "${attempt < max_attempts}" \
-        and retry_next == "continue", (loop, retry_cond, retry_next)
+    # one job_failed per run: only give_up notifies, after the loop; failed attempts before the last only log and sleep
+    loop, give_up = yq('[[.. | select(tag == "!!map" and has("attempts")) | .attempts.for.steps[] | keys[0]]]'
+                       ' + [[.. | select(tag == "!!map" and has("give_up")) | .give_up.switch[0].steps[] | keys[0]]]', wf_path)
+    assert "notify_failure" not in loop and give_up == ["notify_failure", "reraise"], (loop, give_up)
     print("ok")
 
 
