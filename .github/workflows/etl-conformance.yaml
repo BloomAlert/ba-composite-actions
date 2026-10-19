@@ -1,0 +1,80 @@
+# Reusable ETL conformance check (CI-06); see docs/etl-workflows.md.
+name: etl-conformance
+
+on:
+  workflow_call:
+    inputs:
+      warn:
+        description: Report FAILs without failing (until the repo converges)
+        type: boolean
+        default: true
+    secrets:
+      # GitHub App on etl-template (private), Contents: read; see the docs.
+      ETL_TEMPLATE_APP_CLIENT_ID:
+        required: false
+      ETL_TEMPLATE_APP_PRIVATE_KEY:
+        required: false
+
+permissions: {}
+
+jobs:
+  conformance:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: repo
+          persist-credentials: false
+
+      - name: Template ref
+        id: ref
+        env:
+          CLIENT_ID: ${{ secrets.ETL_TEMPLATE_APP_CLIENT_ID }}
+          KEY_SET: ${{ secrets.ETL_TEMPLATE_APP_PRIVATE_KEY != '' }}
+        run: |
+          if [[ -f repo/copier.yml ]]; then
+            # etl-template itself: its own script, no --template, no token
+            { echo "self=true"; echo "script=repo/scripts/conformance.py"; echo "args="; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # .copier-answers.yml is flat YAML written by copier: `_commit: v1.1.0`.
+          ref=$(sed -n 's/^_commit:[[:space:]]*//p' repo/.copier-answers.yml 2>/dev/null | tr -d "'\"")
+          [[ -n "$ref" ]] \
+            || { echo "::error::no _commit in .copier-answers.yml: adopt etl-template with copier first (SHARED-01)"; exit 1; }
+          # copier writes a git-describe string when copied from an untagged commit
+          [[ "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "::error::_commit '$ref' is not a release tag: copier copy/update with --vcs-ref vX.Y.Z"; exit 1; }
+          [[ -n "$CLIENT_ID" && "$KEY_SET" == true ]] \
+            || { echo "::error::ETL_TEMPLATE_APP_CLIENT_ID / ETL_TEMPLATE_APP_PRIVATE_KEY not set for this repo: org secrets, in Actions and in Dependabot (docs/etl-workflows.md)"; exit 1; }
+          { echo "ref=$ref"; echo "script=template/scripts/conformance.py"; echo "args=--template template"; } >> "$GITHUB_OUTPUT"
+
+      - id: token
+        if: steps.ref.outputs.self != 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.ETL_TEMPLATE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.ETL_TEMPLATE_APP_PRIVATE_KEY }}
+          owner: BloomAlert
+          repositories: etl-template
+          permission-contents: read
+
+      - if: steps.ref.outputs.self != 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: BloomAlert/etl-template
+          ref: ${{ steps.ref.outputs.ref }}
+          token: ${{ steps.token.outputs.token }}
+          path: template
+          persist-credentials: false
+
+      # Stdlib only; no uv: pr_checks already runs `uv lock --check` (PKG-03).
+      - name: Conformance
+        env:
+          SCRIPT: ${{ steps.ref.outputs.script }}
+          ARGS: ${{ steps.ref.outputs.args }}
+          WARN: ${{ inputs.warn && '--warn' || '' }}
+        # ARGS/WARN unquoted on purpose: empty or space-separated flags
+        run: python3 "$SCRIPT" repo $ARGS $WARN
