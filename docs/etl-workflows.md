@@ -1,6 +1,6 @@
 # ETL reusable workflows
 
-`etl-build.yaml` and `etl-deploy.yaml` build and run the `etl-*` fleet's Cloud Run jobs (etl-template #47 CI, #50 RUN, #52 ALERT). The composite actions in this repo are a separate thing, and their `@main` callers are unaffected.
+`etl-build.yaml` and `etl-deploy.yaml` build and run the `etl-*` fleet's Cloud Run jobs (etl-template #47 CI, #50 RUN, #52 ALERT). `etl-conformance.yaml` checks a repo against the ETL standard (CI-06). The composite actions in this repo are a separate thing, and their `@main` callers are unaffected.
 
 - Pin both workflows by full SHA with a `# vX.Y.Z` comment (CI-04/05).
 - Examples are in [`examples/`](examples/):
@@ -203,6 +203,24 @@ Self-check: `python3 etl/test_render.py` (needs `yq`). Proof mode: `python3 etl/
 - `UNDECLARED`: orphans that haven't been deleted.
 
 It needs names only, not values.
+
+## Conformance check (CI-06)
+
+`etl-conformance.yaml` runs etl-template's `scripts/conformance.py` against the caller. It uses the template at the tag the caller's `.copier-answers.yml` pins (`_commit`), so a repo is checked against the standard it adopted, and it passes `--template`, so SHARED-02 checks for edits to template-owned files. Fleet repos therefore carry no copy of the script. etl-template itself, which has a `copier.yml`, runs its own script and needs no token.
+
+```yaml
+  conformance:
+    permissions:
+      contents: read
+    uses: BloomAlert/ba-composite-actions/.github/workflows/etl-conformance.yaml@<sha> # vX.Y.Z
+    with:
+      warn: true   # until the repo converges (standard: Enforcement lifecycle)
+    secrets:
+      ETL_TEMPLATE_APP_CLIENT_ID: ${{ secrets.ETL_TEMPLATE_APP_CLIENT_ID }}
+      ETL_TEMPLATE_APP_PRIVATE_KEY: ${{ secrets.ETL_TEMPLATE_APP_PRIVATE_KEY }}
+```
+
+etl-template is private, so the job reads it with a GitHub App token. The App is installed on etl-template only, with Contents: read. Its client ID and private key are org secrets, set in both Actions and Dependabot, because Dependabot PRs only see Dependabot secrets. A missing `_commit` fails the job (SHARED-01).
 
 ## IAM (verify in phase 2)
 

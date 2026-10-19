@@ -25,4 +25,4 @@ similar artifact include/exclude configuration.
 
 ## ETL reusable workflows
 
-`.github/workflows/etl-build.yaml` and `etl-deploy.yaml` are for the `etl-*` fleet; see [docs/etl-workflows.md](docs/etl-workflows.md).
+`.github/workflows/etl-build.yaml`, `etl-deploy.yaml` and `etl-conformance.yaml` are for the `etl-*` fleet; see [docs/etl-workflows.md](docs/etl-workflows.md).
