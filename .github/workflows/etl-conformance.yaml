@@ -38,6 +38,9 @@ jobs:
 
       - name: Template ref
         id: ref
+        env:
+          CLIENT_ID: ${{ secrets.ETL_TEMPLATE_APP_CLIENT_ID }}
+          KEY_SET: ${{ secrets.ETL_TEMPLATE_APP_PRIVATE_KEY != '' }}
         run: |
           if [[ -f repo/copier.yml ]]; then
             echo "self=true" >> "$GITHUB_OUTPUT"
@@ -47,6 +50,11 @@ jobs:
           ref=$(sed -n 's/^_commit:[[:space:]]*//p' repo/.copier-answers.yml 2>/dev/null | tr -d "'\"")
           [[ -n "$ref" ]] \
             || { echo "::error::no _commit in .copier-answers.yml: adopt etl-template with copier first (SHARED-01)"; exit 1; }
+          # copier writes a git-describe string when copied from an untagged commit
+          [[ "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "::error::_commit '$ref' is not a release tag: copier copy/update with --vcs-ref vX.Y.Z"; exit 1; }
+          [[ -n "$CLIENT_ID" && "$KEY_SET" == true ]] \
+            || { echo "::error::ETL_TEMPLATE_APP_CLIENT_ID / ETL_TEMPLATE_APP_PRIVATE_KEY not set for this repo: org secrets, in Actions and in Dependabot (docs/etl-workflows.md)"; exit 1; }
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       - id: token

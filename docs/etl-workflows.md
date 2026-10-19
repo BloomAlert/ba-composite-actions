@@ -214,13 +214,15 @@ It needs names only, not values.
       contents: read
     uses: BloomAlert/ba-composite-actions/.github/workflows/etl-conformance.yaml@<sha> # vX.Y.Z
     with:
-      warn: true   # until the repo converges (standard: Enforcement lifecycle)
+      # pr_checks.yaml is template-owned (byte-checked by SHARED-02), so the
+      # per-repo switch is a repo variable, not an edit here.
+      warn: ${{ vars.ETL_CONFORMANCE_ENFORCE != 'true' }}
     secrets:
       ETL_TEMPLATE_APP_CLIENT_ID: ${{ secrets.ETL_TEMPLATE_APP_CLIENT_ID }}
       ETL_TEMPLATE_APP_PRIVATE_KEY: ${{ secrets.ETL_TEMPLATE_APP_PRIVATE_KEY }}
 ```
 
-etl-template is private, so the job reads it with a GitHub App token. The App is installed on etl-template only, with Contents: read. Its client ID and private key are org secrets, set in both Actions and Dependabot, because Dependabot PRs only see Dependabot secrets. A missing `_commit` fails the job (SHARED-01).
+etl-template is private, so the job reads it with a GitHub App token. The App is installed on etl-template only, with Contents: read. Its client ID and private key are org secrets, set in both Actions and Dependabot, because Dependabot PRs only see Dependabot secrets. A missing or untagged `_commit`, or missing secrets, fails the job with a message naming the fix.
 
 ## IAM (verify in phase 2)
 
