@@ -4,7 +4,7 @@
 # Input: {"args": [...], "labels": {...}, "chain": bool, "retry": int}; "chain": false (default true) skips NEXT_WORKFLOW
 # for this run; "retry": n lowers RETRY_COUNT for this run only (clamped to it; invalid -> ignored and logged).
 # Manual run:
-#   gcloud workflows run <name> --data='{"args":["--start-dt","2026-10-01"]}' --labels=instance=manual
+#   gcloud workflows run <name> --data='{"args":["--start-dt","2026-10-01"],"labels":{"instance":"manual"}}'
 main:
   params: [input]
   steps:
