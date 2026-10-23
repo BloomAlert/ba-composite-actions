@@ -8,7 +8,6 @@ job:
   memory: 4Gi
   timeout: 900s
 env:
-  - USE_CLOUD_LOGGING
   - GCP_BUCKET_NAME=GCP_MAPS_BUCKET
   - MAP_ARRIVAL_TOPIC
 time_zone: America/Santiago

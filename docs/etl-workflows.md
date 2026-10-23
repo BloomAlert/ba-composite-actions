@@ -143,10 +143,10 @@ Workflow etl/workflow.yaml (generic, one per flow)
     - `execution`, `attempt`, `args`
   - **One `job_failed` per run** (last attempt only; earlier failures log a WARNING). A run that recovers by retrying sends only `job_succeeded`, so it stays silent in Slack unless a failure thread already exists.
   - Notifying is **fail-soft**: a notifier error is logged and never fails the workflow.
-- **Manual run:** `gcloud workflows run <wf> --data='{"args":["--start-dt","…"],"labels":{"instance":"manual"}}'`
+- **Manual run:** `gcloud workflows run <wf> --data='{"args":["--start-date","…"],"labels":{"instance":"manual"}}'`
   The instance label goes in `--data`: the workflow reads `labels` from its input (it becomes the notify `context` and the Slack thread key). `--labels` only tags the execution in GCP and never reaches the workflow.
 - **Skip `next` for one run:** add `"chain": false` (default `true`), e.g. a maps backfill without the timeseries run:
-  `gcloud workflows run <wf> --data='{"args":["--start-dt","…"],"chain":false,"labels":{"instance":"manual"}}'`.
+  `gcloud workflows run <wf> --data='{"args":["--start-date","…"],"chain":false,"labels":{"instance":"manual"}}'`.
   When the next workflow is started, `chain` and `retry` are removed from its input; everything else is passed unchanged.
 - **Fewer retries for one run:** add `"retry": n` (integer >= 0) to use at most `n` retries instead of `RETRY_COUNT`, e.g. `"retry": 0` for a manual run that should fail once, not retry 16 times.
   - It can only lower retries: values above `RETRY_COUNT` are clamped to it.
