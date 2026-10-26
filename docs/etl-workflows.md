@@ -91,7 +91,7 @@ instances:                    # one Scheduler each; name = [a-z0-9-], also the `
 
 A flow with `instances: []` gets a job and workflow but no scheduler (and needs no `GCP_SCHEDULER_SERVICE_ACCOUNT`): it's started by `next`, a Cloud Function or by hand. The `instances` key itself is required. It has no schedule to derive a heartbeat from, so it needs `heartbeat_window` or `heartbeat: false`, and its legacy resources go in the flow-level `replaces`. Any existing scheduler that targets its workflow is an orphan and is paused (below).
 
-`ENVIRONMENT` and `GCP_PROJECT_ID` are always set on the job. Each deploy sets the full env (`--env-vars-file` replaces it) and all secret refs (`--set-secrets`, or `--clear-secrets` when none are declared).
+`ENVIRONMENT` and `GCP_PROJECT_ID` are always set on the job. Each deploy sets the full env (`--env-vars-file` replaces it) and all secret refs (`--set-secrets`, or `--clear-secrets` when none are declared). Container args and command are reset to empty on every deploy (`--args='' --command=''`), so a hand edit or an older deploy never survives; the image ENTRYPOINT owns the command (DOCK-06) and per-run args come from the workflow input.
 
 ### Credentials (Secret Manager only)
 
