@@ -179,7 +179,8 @@ Workflow etl/workflow.yaml (generic, one per flow)
      - daily: 25h, the alerting maximum
      - no instances, or anything else (day-of-week/month, names, ranges) needs `heartbeat_window` or `heartbeat: false`, otherwise the deploy fails
      - with several instances, the smallest window wins
-   - The policy is created only once the metric exists, i.e. from the second deploy on, so a metric with no data yet can't raise a false alarm.
+   - The policy is created in the same run as its metric. A just-created metric can lag, so the create retries (5 tries, 20 s apart) only on a "metric unknown" error; any other error fails the deploy.
+   - A newly created policy is **snoozed for its first window** (`<metric>-first-window`), so a metric with no data yet can't raise a false alarm. A snooze failure (e.g. a missing IAM role) is a `::warning::`, never a failed deploy; the cost is one early incident. Updating an existing policy never snoozes it.
 
 **RUN-05 (Artifact Registry):**
 - `etl-build` sets the cleanup policy once, when it creates `<repo>-<env>` ([`etl/ar-cleanup-policy.json`](../etl/ar-cleanup-policy.json)):
@@ -228,7 +229,7 @@ etl-template is private, so the job reads it with a GitHub App token. The App is
 
 | SA | roles |
 |---|---|
-| deploy | `roles/artifactregistry.writer` on `<repo>-<env>` (`tags add` needs `artifactregistry.tags.create`/`.update`), `roles/run.developer`, `roles/workflows.editor`, `roles/cloudscheduler.admin` (pause included), `roles/logging.configWriter`, `roles/monitoring.alertPolicyEditor`, `roles/iam.serviceAccountUser` on the job, workflow and scheduler SAs. Possibly also `roles/monitoring.notificationChannelViewer`, if attaching the channel needs `notificationChannels.get` |
+| deploy | `roles/artifactregistry.writer` on `<repo>-<env>` (`tags add` needs `artifactregistry.tags.create`/`.update`), `roles/run.developer`, `roles/workflows.editor`, `roles/cloudscheduler.admin` (pause included), `roles/logging.configWriter`, `roles/monitoring.alertPolicyEditor`, `roles/monitoring.snoozeEditor` (first-window heartbeat snooze), `roles/iam.serviceAccountUser` on the job, workflow and scheduler SAs. Possibly also `roles/monitoring.notificationChannelViewer`, if attaching the channel needs `notificationChannels.get` |
 | drift (read-only) | `roles/run.viewer`, `roles/workflows.viewer`, `roles/cloudscheduler.viewer`, `roles/logging.viewer` (metrics list), `roles/monitoring.viewer` |
 | workflow | what it has today (`run.jobs.runWithOverrides`, `run.invoker` on ba-ops-notify), plus `roles/run.viewer` (`tasks.list` for the exit code), `roles/workflows.invoker` (`next`) and `roles/logging.viewer` (`logEntries.list` for the cause) |
 | build | `roles/artifactregistry.writer`, plus `artifactregistry.repositories.create` and `.update` (set the policy at creation; `repoAdmin` lacks `update`) |

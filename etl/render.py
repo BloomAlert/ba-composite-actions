@@ -234,8 +234,8 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
             f" --oauth-service-account-email={token('GCP_SCHEDULER_SERVICE_ACCOUNT')}"  # only flows with a scheduler
             f" --{'update-' if action == 'update' else ''}headers=Content-Type=application/json")
 
-    # ALERT-03 heartbeat: successful executions of this job; the policy only once the metric exists,
-    # so a brand-new metric with no data yet can't fire a false alert
+    # ALERT-03 heartbeat: successful executions of this job. A new policy is snoozed for its first window,
+    # so a brand-new metric with no data yet can't fire a false alert (#24)
     if window:
         log_filter = (f'resource.type="cloud_run_job" AND resource.labels.job_name="{job_name}"'
                       f' AND logName="projects/{project}/logs/run.googleapis.com%2Fvarlog%2Fsystem"'
@@ -244,36 +244,44 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
         cmds.append(f"# {v}\ngcloud logging metrics {v} {metric}"
                     f" --project={project} --description={q('etl-deploy heartbeat (ALERT-03)')}"
                     f" --log-filter={q(log_filter)}")
-        if metric in live_names["metrics"]:
-            files["heartbeat-policy.json"] = {
-                "displayName": metric,
-                "combiner": "OR",
-                "userLabels": {"managed-by": "etl-deploy"},
-                "notificationChannels": [need("ETL_ALERT_CHANNEL")],
-                "documentation": {"mimeType": "text/markdown",
-                                  "content": f"No successful execution of `{job_name}` in {window // 60} min."},
-                "conditions": [{
-                    "displayName": f"no success in {window // 60} min",
-                    "conditionThreshold": {
-                        "filter": f'metric.type="logging.googleapis.com/user/{metric}"'
-                                  ' AND resource.type="cloud_run_job"',
-                        "aggregations": [{"alignmentPeriod": f"{window}s", "perSeriesAligner": "ALIGN_SUM",
-                                          "crossSeriesReducer": "REDUCE_SUM"}],
-                        "comparison": "COMPARISON_LT", "thresholdValue": 1, "duration": "300s",
-                        # same shape as ba-infra app-alerts: silence counts as a breach
-                        "evaluationMissingData": "EVALUATION_MISSING_DATA_ACTIVE",
-                        "trigger": {"count": 1},
-                    },
-                }],
-            }
-            if (v := upsert("policies", metric)) == "update":
-                cmds.append(f"# {v}\ngcloud monitoring policies update {live_names['policies'][metric]['name']}"
-                            f' --project={project} --policy-from-file="$ETL_OUT/heartbeat-policy.json"')
-            else:
-                cmds.append(f"# {v}\ngcloud monitoring policies create --project={project}"
-                            ' --policy-from-file="$ETL_OUT/heartbeat-policy.json"')
-        else:
-            cmds.append("# heartbeat policy deferred: its metric is new, so it's created on the next deploy")
+        files["heartbeat-policy.json"] = {
+            "displayName": metric,
+            "combiner": "OR",
+            "userLabels": {"managed-by": "etl-deploy"},
+            "notificationChannels": [need("ETL_ALERT_CHANNEL")],
+            "documentation": {"mimeType": "text/markdown",
+                              "content": f"No successful execution of `{job_name}` in {window // 60} min."},
+            "conditions": [{
+                "displayName": f"no success in {window // 60} min",
+                "conditionThreshold": {
+                    "filter": f'metric.type="logging.googleapis.com/user/{metric}"'
+                              ' AND resource.type="cloud_run_job"',
+                    "aggregations": [{"alignmentPeriod": f"{window}s", "perSeriesAligner": "ALIGN_SUM",
+                                      "crossSeriesReducer": "REDUCE_SUM"}],
+                    "comparison": "COMPARISON_LT", "thresholdValue": 1, "duration": "300s",
+                    # same shape as ba-infra app-alerts: silence counts as a breach
+                    "evaluationMissingData": "EVALUATION_MISSING_DATA_ACTIVE",
+                    "trigger": {"count": 1},
+                },
+            }],
+        }
+        if (v := upsert("policies", metric)) == "update":
+            cmds.append(f"# {v}\ngcloud monitoring policies update {live_names['policies'][metric]['name']}"
+                        f' --project={project} --policy-from-file="$ETL_OUT/heartbeat-policy.json"')
+        else:  # retry only "metric unknown" (a just-created metric may lag); any other error fails the deploy
+            cmds.append(
+                f"# {v}\nfor try in 1 2 3 4 5; do\n"
+                f"  if POLICY=$(gcloud monitoring policies create --project={project}"
+                ' --policy-from-file="$ETL_OUT/heartbeat-policy.json" --format=\'value(name)\' 2>"$ETL_OUT/policy.err"); then break; fi\n'
+                '  cat "$ETL_OUT/policy.err" >&2\n'
+                '  grep -qiE \'metric.*(unknown|not found|cannot find|does not exist)\' "$ETL_OUT/policy.err" && [ "$try" -lt 5 ] || exit 1\n'
+                "  sleep 20\ndone\n"
+                # no data yet = breach (EVALUATION_MISSING_DATA_ACTIVE): mute the first window; never fail the deploy
+                f"gcloud monitoring snoozes create --project={project} --criteria-policies=\"$POLICY\""
+                f" --display-name={q(metric + '-first-window')} --start-time=\"$(date -u +%FT%TZ)\""
+                f" --end-time=\"$(date -u -d '+{window} seconds' +%FT%TZ)\""
+                f" || echo \"::warning::heartbeat snooze not created for $POLICY (deploy SA needs"
+                f" roles/monitoring.snoozeEditor); it may alert before {metric} gets its first data\"")
     else:
         cmds.append("# heartbeat: disabled in the declaration (heartbeat: false)")
 
