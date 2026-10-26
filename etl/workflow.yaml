@@ -52,7 +52,7 @@ main:
           - execution: null  # the failed attempt's Execution, if it started
           - job_op: null
 
-    - check_types:  # "chain": "false" must not silently start NEXT_WORKFLOW
+    - check_types:  # types; also routes a bad key from check_keys (next can't leave a for loop)
         switch:
           - condition: ${bad != null}
             next: reject_input
@@ -77,7 +77,7 @@ main:
                 switch:
                   - condition: ${get_type(arg) != "string"}
                     assign:
-                      - bad: ${"input.args must be a list of strings, got " + json.encode_to_string(final_args_list)}
+                      - bad: ${"input.args must be a list of strings, got arg " + json.encode_to_string(arg)}
                     next: break
     - input_ok:
         switch:
@@ -85,17 +85,20 @@ main:
             next: override_retry
     - reject_input:  # notify first: fire-and-forget callers would otherwise trade a wrong window for no run at all
         steps:
+          - bad_msg:
+              assign:
+                - bad: ${bad + "; expected " + shape}
           - notify_bad_input:
               call: notify
               args:
                 event_type: job_failed
                 execution: null
-                summary: ${bad + "; expected " + shape}
+                summary: ${bad}
                 labels: ${empty}
                 extra:
                   input: ${json.encode_to_string(input)}
           - raise_bad_input:
-              raise: ${bad + "; expected " + shape}
+              raise: ${bad}
 
     - override_retry:  # fail-soft: a bad value keeps RETRY_COUNT; a run can lower retries, never raise them
         switch:

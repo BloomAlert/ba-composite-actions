@@ -298,14 +298,18 @@ def main():
         ' + [[.. | select(tag == "!!map" and has("reject_input")) | .reject_input.steps[] | keys[0]]]', wf_path)
     assert allowed == ["args", "labels", "chain", "retry"] and keys_cond == "${not(key in allowed)}", (allowed, keys_cond)
     assert all(f'get_type({v})' in " ".join(types) for v in ("final_args_list", "labels", "chain")), types
-    assert items == '${get_type(arg) != "string"}' and reject == ["notify_bad_input", "raise_bad_input"], (items, reject)
+    assert items == '${get_type(arg) != "string"}' and reject == ["bad_msg", "notify_bad_input", "raise_bad_input"], (items, reject)
     # every scheduler body the examples render passes that allowlist
-    for ex, decl in (("ews", "runtime.yaml"), ("stormglass", "runtime.yaml"), ("cmems", "maps.yaml")):
-        for cmd in render(ex, decl).stdout.splitlines():
-            for tok in shlex.split(cmd) if cmd.startswith("gcloud scheduler jobs") else []:
-                if tok.startswith("--message-body="):
-                    arg = json.loads(json.loads(tok.split("=", 1)[1])["argument"])
-                    assert set(arg) <= set(allowed) and all(isinstance(a, str) for a in arg["args"]), (ex, arg)
+    no_replaces = lambda d: [i.pop("replaces") for i in d["instances"]]  # synthetic live has no old maps jobs
+    for ex, decl, patch in (("ews", "runtime.yaml", None), ("stormglass", "runtime.yaml", None),
+                            ("cmems", "maps.yaml", no_replaces)):
+        r = render(ex, decl, patch=patch)
+        bodies = [t.split("=", 1)[1] for ln in r.stdout.splitlines() if ln.startswith("gcloud scheduler jobs")
+                  for t in shlex.split(ln) if t.startswith("--message-body=")]
+        assert r.returncode == 0 and bodies, (ex, r.returncode, r.stderr)
+        for body in bodies:
+            arg = json.loads(json.loads(body)["argument"])
+            assert set(arg) <= set(allowed) and all(isinstance(a, str) for a in arg["args"]), (ex, arg)
     # next: per-run opt-out "chain": false; the next run gets the input minus "chain"
     cond, argument = yq('[.. | select(tag == "!!map" and has("start_next")) | .start_next.switch[0]'
                         ' | (.condition, .steps[0].create_next_execution.args.body.argument)]', wf_path)
