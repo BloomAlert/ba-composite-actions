@@ -205,7 +205,7 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
         'source "$ETL_OUT/secrets.env"',
         (f"# {upsert('jobs', job_name)}\ngcloud run jobs deploy {job_name} --project={project} --region={region}"
         f" --image={q(image)} --service-account={token(job['service_account_var'])} --cpu={job['cpu']}"
-        f" --memory={job['memory']} --task-timeout={timeout}s --max-retries=0 --quiet"
+        f" --memory={job['memory']} --task-timeout={timeout}s --max-retries=0 --args='' --command='' --quiet"
         ' --env-vars-file="$ETL_OUT/job-env.yaml"'
         + (f" --set-secrets={q(','.join(set_secrets))}" if set_secrets else " --clear-secrets")),
         # RUN-05: only once the job runs this image; moves this image name's :deployed (AR keep-deployed rule)

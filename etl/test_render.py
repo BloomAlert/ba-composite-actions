@@ -124,6 +124,8 @@ def main():
     assert '\\"args\\": [\\"--ts-id\\", \\"WH-01\\"]' in sg and '"labels": {"instance": "wh-01"}' in sg
 
     assert "--clear-secrets" in sg  # no `secrets:` -> the job keeps no stale secret refs
+    assert all(" --args='' --command='' " in ln for out in (ews, sg)
+               for ln in out.splitlines() if ln.startswith("gcloud run jobs deploy "))  # #27: no stale args/command survive
 
     # env reads vars only: a name that exists only as a GitHub secret fails, value never rendered
     leak = render("stormglass", drop=("STORMGLASS_SECRET_KEY",),
