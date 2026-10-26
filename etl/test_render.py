@@ -36,7 +36,7 @@ def synthetic_live(env="staging"):
         live["schedulers"].append({"name": sched, "state": "ENABLED", "uri": wf_uri(wf)})
 
     legacy(f"etl-ews-ingestion-{env}", f"workflow-ews-ingestion-{env}", f"schedule-ews-ingestion-{env}", REPOS["ews"])
-    live["metrics"].append({"name": f"etl-heartbeat-etl-ews-ingestion-{env}"})  # 2nd deploy: policy now created
+    live["metrics"].append({"name": f"etl-heartbeat-etl-ews-ingestion-{env}"})  # metric live, policy not (e.g. deleted by hand)
     legacy(f"etl-well-level-ews-{env}", f"workflow-etl-well-level-ews-{env}", f"schedule-etl-well-level-ews-{env}",
            "etl-ingestion-well-level-ews-gcp")
     for i in "wh-01 wh-02 wad-01 wid-01 wis-01 wap-01 swd-01 swh-01 swp-01 wid-03 wis-03".split():
@@ -98,7 +98,8 @@ def main():
     assert "# plan: runtime 0 create, 3 update; heartbeat 1 create, 1 update; 0 pause, 0 orphans" in ews, ews
     assert lines(ews, "gcloud scheduler jobs update http schedule-ews-ingestion-staging ")
     assert "gcloud workflows deploy workflow-ews-ingestion-staging " in ews
-    assert "gcloud monitoring policies create" in ews  # metric already existed -> policy now
+    assert "gcloud monitoring policies create" in ews  # #24: policy missing -> create + first-window snooze
+    assert "--end-time=\"$(date -u -d '+3600 seconds' +%FT%TZ)\"" in ews and "|| echo \"::warning::" in ews
     assert "well-level" not in ews  # neighbours aren't orphans
     job_env = json.load(open(os.path.join(r.out, "job-env.yaml")))
     assert job_env["AUTH0_DOMAIN"] == NASTY and "SFTP_BANNER_TIMEOUT" not in job_env  # (1) value intact, optional omitted
@@ -111,8 +112,29 @@ def main():
 
     r = render("stormglass")
     sg = r.stdout
-    assert "# plan: runtime 13 create, 0 update; heartbeat 1 create, 0 update; 11 pause, 34 orphans" in sg, sg
-    assert "heartbeat policy deferred" in sg  # (7) no policy before the metric exists
+    assert "# plan: runtime 13 create, 0 update; heartbeat 2 create, 0 update; 11 pause, 34 orphans" in sg, sg
+    # (7) #24: new metric -> policy in the same run, then a snooze for its first window (daily -> 25h)
+    hb = [lines(sg, p)[0] for p in ("gcloud logging metrics create", "  if POLICY=$(gcloud monitoring policies create",
+                                    "gcloud monitoring snoozes create")]
+    assert hb == sorted(hb) and "+90000 seconds" in sg, sg
+    assert '"alignmentPeriod": "90000s"' in open(os.path.join(r.out, "heartbeat-policy.json")).read()
+    # 9 waits x 60s covers GCP's "up to 10 min" metric lag and stays inside etl-deploy's 20-min job timeout
+    assert "for try in 1 2 3 4 5 6 7 8 9 10;" in sg and "sleep 60" in sg
+    loop = sg[sg.index("for try in"):sg.index("done\n", sg.index("for try in")) + 5].replace("sleep 60", "sleep 0")
+    with tempfile.TemporaryDirectory() as d:  # run the rendered retry loop against a stub gcloud
+        stub = os.path.join(d, "gcloud")
+        with open(stub, "w") as f:
+            f.write('#!/bin/sh\nn=$(cat "$ETL_OUT/n" 2>/dev/null || echo 0); echo $((n+1)) > "$ETL_OUT/n"\n'
+                    '[ "$n" -ge "$FAILS" ] && { echo projects/p/alertPolicies/1; exit 0; }; echo "$ERR" >&2; exit 1\n')
+        os.chmod(stub, 0o755)
+        lag = ('ERROR: (gcloud.monitoring.policies.create) NOT_FOUND: Cannot find metric(s) that match type ='
+               ' "logging.googleapis.com/user/x". If a metric was created recently, it could take up to 10 minutes')
+        for fails, err, rc in ((2, lag, 0), (1, "PERMISSION_DENIED: no", 1), (10, lag, 1)):
+            for n in os.listdir(d):
+                n != "gcloud" and os.remove(os.path.join(d, n))
+            env = {**os.environ, "PATH": f"{d}:{os.environ['PATH']}", "ETL_OUT": d, "FAILS": str(fails), "ERR": err}
+            got = subprocess.run(["bash", "-c", loop], env=env, capture_output=True).returncode
+            assert got == rc, (fails, err, got)
     for secret in [*SECRETS.values(), NASTY]:  # (2) no value from env files/secrets in the plan
         assert secret not in sg, secret
     assert '--service-account="$S_GCP_WORKFLOW_SERVICE_ACCOUNT"' in sg
@@ -183,6 +205,13 @@ def main():
 
     off = render("ews", patch=lambda d: d.update(heartbeat=False))  # opt-out lists the leftover metric
     assert "echo '  metrics/etl-heartbeat-etl-ews-ingestion-staging'" in off.stdout, off.stdout + off.stderr
+    assert "monitoring policies" not in off.stdout and "snoozes" not in off.stdout  # opt-out: no policy, no snooze
+    live = synthetic_live()  # policy already live: update in place, never a second snooze
+    live["policies"].append({"displayName": "etl-heartbeat-etl-ews-ingestion-staging",
+                             "name": f"projects/{P}/alertPolicies/9"})
+    upd = render("ews", live=live).stdout
+    assert f"gcloud monitoring policies update projects/{P}/alertPolicies/9 " in upd and "snoozes" not in upd, upd
+    assert "heartbeat 0 create, 2 update" in upd
 
     def weekly(d):  # (6) sparser than daily needs an explicit window
         d["instances"][0]["schedule"] = "0 13 * * MON"
@@ -196,7 +225,7 @@ def main():
         d.update(instances=[], replaces=["etl-well-level-ews-{env}", "workflow-etl-well-level-ews-{env}",
                                          "schedule-etl-well-level-ews-{env}"], **kw)
     ev = render("stormglass", patch=lambda d: event(d, heartbeat_window="6h"))
-    assert "# plan: runtime 2 create, 0 update; heartbeat 1 create, 0 update; 1 pause, 4 orphans" in ev.stdout, \
+    assert "# plan: runtime 2 create, 0 update; heartbeat 2 create, 0 update; 1 pause, 4 orphans" in ev.stdout, \
         ev.stdout + ev.stderr
     assert not lines(ev.stdout, "gcloud scheduler jobs create") and "workflow-etl-well-level-ews-staging'" in ev.stdout
     assert lines(ev.stdout, "gcloud scheduler jobs pause schedule-etl-well-level-ews-staging ")
@@ -234,7 +263,7 @@ def main():
     drift = render("stormglass", mode="drift")
     assert drift.returncode == 1 and len(lines(drift.stdout, "MISSING")) == 14, drift.stdout
     assert len(lines(drift.stdout, "UNDECLARED")) == 34
-    assert lines(render("ews", mode="drift").stdout, "MISSING") == [0]  # only the deferred policy
+    assert lines(render("ews", mode="drift").stdout, "MISSING") == [0]  # only the hand-deleted policy
 
     # (10) + RUN-05: untagged image refs mean :latest; build's inline policy == etl/ar-cleanup-policy.json
     sys.dont_write_bytecode = True
