@@ -125,6 +125,7 @@ The render **fails** when:
 Scheduler (per instance) ── POST …/workflows/<wf>/executions
    {"argument": "{\"args\":[…],\"labels\":{\"instance\":…[,\"flow\":…]}}", "labels": {"instance": …}}
 Workflow etl/workflow.yaml (generic, one per flow)
+   input not {args?, labels?, chain?, retry?} or wrong types → ba-ops-notify job_failed (execution null), then raise
    for attempt in 1..min(retry ?? RETRY_COUNT, RETRY_COUNT)+1:  jobs.run(JOB_NAME, containerOverrides[0].args = args)
       failure, attempts left → WARNING log (attempt n/max, execution, exit code), sleep RETRY_BACKOFF_SECONDS
    all attempts failed → ba-ops-notify job_failed (last attempt's exit code/class, attempt max/max), then raise
@@ -143,6 +144,7 @@ Workflow etl/workflow.yaml (generic, one per flow)
     - `execution`, `attempt`, `args`
   - **One `job_failed` per run** (last attempt only; earlier failures log a WARNING). A run that recovers by retrying sends only `job_succeeded`, so it stays silent in Slack unless a failure thread already exists.
   - Notifying is **fail-soft**: a notifier error is logged and never fails the workflow.
+- **Input is validated** before the job runs (#21): it must be a JSON object with only the keys `args` (list of strings), `labels` (object), `chain` (bool) and `retry`. Anything else, e.g. `{"start_dt": …}` or `"args": "--x"`, sends `job_failed` and fails the execution with no job run, instead of silently running the job's default window. All keys are optional: no `--data`, `{}` or no `args` still run the job with its defaults.
 - **Manual run:** `gcloud workflows run <wf> --data='{"args":["--start-date","…"],"labels":{"instance":"manual"}}'`
   The instance label goes in `--data`: the workflow reads `labels` from its input (it becomes the notify `context` and the Slack thread key). `--labels` only tags the execution in GCP and never reaches the workflow.
 - **Skip `next` for one run:** add `"chain": false` (default `true`), e.g. a maps backfill without the timeseries run:
