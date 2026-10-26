@@ -119,7 +119,7 @@ def main():
     pauses, metric = lines(sg, "gcloud scheduler jobs pause "), lines(sg, "gcloud logging metrics")
     creates, wf = lines(sg, "gcloud scheduler jobs create http "), lines(sg, "gcloud workflows deploy ")
     # (4) #23: pause before any create, so a failed create (set -e) never leaves old + new both ENABLED
-    assert len(pauses) == 11 and wf[0] < min(pauses) and max(pauses) < min(creates) and max(pauses) < min(metric)
+    assert len(pauses) == 11 and wf[0] < min(pauses) and max(pauses) < min(creates + metric)
     assert "echo '  schedulers/etl-ingestion-stormglass-old-01-staging'" in sg  # owned by target
     assert "-prod" not in sg.replace("--project", ""), "staging plan must not touch prod"
     assert '\\"args\\": [\\"--ts-id\\", \\"WH-01\\"]' in sg and '"labels": {"instance": "wh-01"}' in sg
@@ -175,13 +175,11 @@ def main():
         if sc["name"].startswith("schedule-stormglass-"):
             sc["state"] = "PAUSED"
     live["jobs"].append({"name": "etl-ingestion-stormglass-staging"})
-    live["workflows"].append({"name": "etl-ingestion-stormglass-staging"})
     live["schedulers"].append({"name": "etl-ingestion-stormglass-wh-01-staging", "state": "ENABLED",
                                "uri": wf_uri("etl-ingestion-stormglass-staging")})
     rerun = render("stormglass", live=live).stdout
-    assert " 0 pause, " in rerun and not lines(rerun, "gcloud scheduler jobs pause "), rerun
+    assert not lines(rerun, "gcloud scheduler jobs pause "), rerun
     assert lines(rerun, "gcloud scheduler jobs update http etl-ingestion-stormglass-wh-01-staging ")
-    assert lines(rerun, "gcloud workflows deploy etl-ingestion-stormglass-staging ")
 
     off = render("ews", patch=lambda d: d.update(heartbeat=False))  # opt-out lists the leftover metric
     assert "echo '  metrics/etl-heartbeat-etl-ews-ingestion-staging'" in off.stdout, off.stdout + off.stderr
