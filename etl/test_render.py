@@ -117,8 +117,9 @@ def main():
         assert secret not in sg, secret
     assert '--service-account="$S_GCP_WORKFLOW_SERVICE_ACCOUNT"' in sg
     pauses, metric = lines(sg, "gcloud scheduler jobs pause "), lines(sg, "gcloud logging metrics")
-    creates = lines(sg, "gcloud scheduler jobs create http ")
-    assert len(pauses) == 11 and max(creates) < min(pauses) and max(pauses) < min(metric)  # (4) ordering
+    creates, wf = lines(sg, "gcloud scheduler jobs create http "), lines(sg, "gcloud workflows deploy ")
+    # (4) #23: pause before any create, so a failed create (set -e) never leaves old + new both ENABLED
+    assert len(pauses) == 11 and wf[0] < min(pauses) and max(pauses) < min(creates) and max(pauses) < min(metric)
     assert "echo '  schedulers/etl-ingestion-stormglass-old-01-staging'" in sg  # owned by target
     assert "-prod" not in sg.replace("--project", ""), "staging plan must not touch prod"
     assert '\\"args\\": [\\"--ts-id\\", \\"WH-01\\"]' in sg and '"labels": {"instance": "wh-01"}' in sg
@@ -168,6 +169,20 @@ def main():
     live["jobs"].append({"name": "etl-ingestion-stormglass-staging"})
     assert "also declares" in render("stormglass", patch=adopt, live=live).stderr
 
+    # #23 re-run after a partial failure (pauses done, one create done): nothing left to pause, existing -> update
+    live = synthetic_live()
+    for sc in live["schedulers"]:
+        if sc["name"].startswith("schedule-stormglass-"):
+            sc["state"] = "PAUSED"
+    live["jobs"].append({"name": "etl-ingestion-stormglass-staging"})
+    live["workflows"].append({"name": "etl-ingestion-stormglass-staging"})
+    live["schedulers"].append({"name": "etl-ingestion-stormglass-wh-01-staging", "state": "ENABLED",
+                               "uri": wf_uri("etl-ingestion-stormglass-staging")})
+    rerun = render("stormglass", live=live).stdout
+    assert " 0 pause, " in rerun and not lines(rerun, "gcloud scheduler jobs pause "), rerun
+    assert lines(rerun, "gcloud scheduler jobs update http etl-ingestion-stormglass-wh-01-staging ")
+    assert lines(rerun, "gcloud workflows deploy etl-ingestion-stormglass-staging ")
+
     off = render("ews", patch=lambda d: d.update(heartbeat=False))  # opt-out lists the leftover metric
     assert "echo '  metrics/etl-heartbeat-etl-ews-ingestion-staging'" in off.stdout, off.stdout + off.stderr
 
@@ -207,6 +222,13 @@ def main():
     wf_env = json.load(open(os.path.join(lg.out, "workflow-env.yaml")))
     assert wf_env["NEXT_WORKFLOW"] == "etl-ingestion-cmems-timeseries-staging" and wf_env["RETRY_COUNT"] == "16"
     assert "--memory=8Gi" in lg.stdout and len(lines(lg.stdout, "gcloud scheduler jobs create http")) == 4
+    # #23: ownership is by target workflow, not name prefix: maps never pauses maps-large's scheduler
+    live = synthetic_live()
+    live["schedulers"].append({"name": "etl-ingestion-cmems-maps-large-chl-02-staging", "state": "ENABLED",
+                               "uri": wf_uri("etl-ingestion-cmems-maps-large-staging")})
+    mp = render("cmems", "maps.yaml", live=live, patch=lambda d: [i.pop("replaces") for i in d["instances"]])
+    assert mp.returncode == 0 and " 0 pause, 0 orphans" in mp.stdout and "maps-large" not in mp.stdout, \
+        mp.stdout + mp.stderr
 
     assert render("ews", drop=("INGESTION_SERVICE",)).returncode != 0
     assert render("ews", env="dev").returncode != 0

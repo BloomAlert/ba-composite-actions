@@ -160,15 +160,15 @@ Workflow etl/workflow.yaml (generic, one per flow)
 1. `run jobs deploy <job> --image=<image>:<sha> --env-vars-file --set-secrets|--clear-secrets --args='' --command=''` (fails before anything changes if the image wasn't built)
    - then `artifacts docker tags add <image>:<sha> <image>:deployed` (RUN-05): moves the image name's `deployed` tag to what the job now runs. Flows sharing an image (cmems `map`) share the tag; they deploy the same commit.
 2. `workflows deploy <wf> --source=etl/workflow.yaml --env-vars-file`. `etl-deploy` checks this repo out at its own commit (OIDC `job_workflow_sha`).
-3. `scheduler jobs create|update http`, once per instance.
-4. **Orphans (RUN-04),** right after the schedulers:
+3. **Orphans (RUN-04),** right after the workflow, before the schedulers:
    - What counts as an orphan:
      - everything named in `replaces` (flow-level or per instance)
      - schedulers that target this flow's workflow but aren't declared (removed instances)
      - the flow's own heartbeat metric/policy when it sets `heartbeat: false`
-   - ENABLED orphan schedulers are **paused**, so two schedulers never fire.
+   - ENABLED orphan schedulers are **paused** before any scheduler is created or updated, so two schedulers never fire, even when a create fails mid-deploy. The cost: a cutover can miss one tick (re-run by hand or wait for the next tick) instead of running twice.
    - All orphans are printed. Nothing is deleted: delete them by hand after prod is verified, then drop the `replaces` entries.
    - The deploy **fails** if a `replaces` name doesn't exist, if a replaced scheduler targets a workflow this flow neither owns nor replaces, or if a `replaces` name is also declared by the flow (in-place adoption needs no `replaces`). That keeps flows independent of deploy order.
+4. `scheduler jobs create|update http`, once per instance.
 5. **Heartbeat (ALERT-03):**
    - log metric `etl-heartbeat-<job>`: the job's `Container called exit(0).` lines
    - alert policy of the same name, which fires when the sum is < 1 over the window

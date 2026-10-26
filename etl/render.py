@@ -215,6 +215,10 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
         f" --service-account={token('GCP_WORKFLOW_SERVICE_ACCOUNT')} --quiet"
         ' --env-vars-file="$ETL_OUT/workflow-env.yaml"'),
     ]
+    # RUN-04: pause old schedulers before creating new ones, so a failed create (set -e) can't leave both
+    # ENABLED and run twice; a missed tick is recoverable, duplicate rows aren't. Deleting is manual.
+    pauses = [n for k, n, state in orphans if k == "schedulers" and state == "ENABLED"]
+    cmds += [f"gcloud scheduler jobs pause {n} --location={region} --project={project}" for n in pauses]
     for inst, sched in schedulers:
         labels = {"instance": inst["name"], **({"flow": flow} if flow else {})}
         body = json.dumps({
@@ -229,9 +233,6 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
             f" --message-body={q(body)} --attempt-deadline=10m"
             f" --oauth-service-account-email={token('GCP_SCHEDULER_SERVICE_ACCOUNT')}"  # only flows with a scheduler
             f" --{'update-' if action == 'update' else ''}headers=Content-Type=application/json")
-    # RUN-04: pause old schedulers right after the new ones exist; deleting is manual, after prod is verified
-    pauses = [n for k, n, state in orphans if k == "schedulers" and state == "ENABLED"]
-    cmds += [f"gcloud scheduler jobs pause {n} --location={region} --project={project}" for n in pauses]
 
     # ALERT-03 heartbeat: successful executions of this job; the policy only once the metric exists,
     # so a brand-new metric with no data yet can't fire a false alert
