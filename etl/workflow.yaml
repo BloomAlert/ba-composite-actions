@@ -1,7 +1,8 @@
 # Generic Cloud Workflow, one per flow (RUN-01). etl-deploy sets its env from an env-vars file:
 #   GCP_PROJECT_ID, GCP_REGION, ENVIRONMENT, JOB_NAME, JOB_TIMEOUT_SECONDS, NOTIFY_URL,
 #   RETRY_COUNT (0 = no retry), RETRY_BACKOFF_SECONDS, NEXT_WORKFLOW ("none" = no chaining).
-# Input: {"args": [...], "labels": {...}, "chain": bool, "retry": int}; "chain": false (default true) skips NEXT_WORKFLOW
+# Input: {"args": [...], "labels": {...}, "chain": bool, "retry": int}, all optional; any other key or a wrong type
+# notifies job_failed and raises before the job runs. "chain": false (default true) skips NEXT_WORKFLOW
 # for this run; "retry": n lowers RETRY_COUNT for this run only (clamped to it; invalid -> ignored and logged).
 # Manual run:
 #   gcloud workflows run <name> --data='{"args":["--start-date","2026-10-01"],"labels":{"instance":"manual"}}'
@@ -10,10 +11,35 @@ main:
   steps:
     - init:
         assign:
-          - labels: {}  # Workflows expressions have no map literal; default in two steps
-          - input: ${default(input, labels)}  # no --data → null; map.delete (start_next) needs a map
+          - empty: {}  # Workflows expressions have no map literal; default in two steps
+          - input: ${default(input, empty)}  # no --data → null; map.delete (start_next) needs a map
+          - allowed: [args, labels, chain, retry]
+          - shape: '{"args": [string, ...], "labels": {...}, "chain": bool, "retry": int}'
+          - bad: null  # why the input is rejected; declared here so the for loops below can set it
+
+    # #21 fail fast: an unknown key (e.g. "start_dt") or a wrong type must not silently run the job's default window
+    - check_input:
+        switch:
+          - condition: ${get_type(input) != "map"}
+            assign:
+              - bad: ${"input must be a JSON object, got " + get_type(input)}
+            next: reject_input
+    - check_keys:
+        for:
+          value: key
+          in: ${keys(input)}
+          steps:
+            - unknown_key:
+                switch:
+                  - condition: ${not(key in allowed)}
+                    assign:
+                      - bad: ${"input has unknown key " + json.encode_to_string(key)}
+                    next: break
+
+    - read_input:
+        assign:
           - final_args_list: ${default(map.get(input, "args"), [])}
-          - labels: ${default(map.get(input, "labels"), labels)}
+          - labels: ${default(map.get(input, "labels"), empty)}
           - chain: ${default(map.get(input, "chain"), true)}
           - retry: ${map.get(input, "retry")}
           - project: ${sys.get_env("GCP_PROJECT_ID")}
@@ -26,10 +52,50 @@ main:
           - execution: null  # the failed attempt's Execution, if it started
           - job_op: null
 
-    - check_chain:  # fail fast: "chain": "false" must not silently start NEXT_WORKFLOW
+    - check_types:  # "chain": "false" must not silently start NEXT_WORKFLOW
         switch:
+          - condition: ${bad != null}
+            next: reject_input
+          - condition: ${get_type(final_args_list) != "list"}
+            assign:
+              - bad: ${"input.args must be a list of strings, got " + json.encode_to_string(final_args_list)}
+            next: reject_input
+          - condition: ${get_type(labels) != "map"}
+            assign:
+              - bad: ${"input.labels must be an object, got " + json.encode_to_string(labels)}
+            next: reject_input
           - condition: ${get_type(chain) != "boolean"}
-            raise: ${"input.chain must be true or false, got " + json.encode_to_string(chain)}
+            assign:
+              - bad: ${"input.chain must be true or false, got " + json.encode_to_string(chain)}
+            next: reject_input
+    - check_arg_items:  # a non-string arg gets a Cloud Run 400 that the loop would retry RETRY_COUNT times
+        for:
+          value: arg
+          in: ${final_args_list}
+          steps:
+            - non_string_arg:
+                switch:
+                  - condition: ${get_type(arg) != "string"}
+                    assign:
+                      - bad: ${"input.args must be a list of strings, got " + json.encode_to_string(final_args_list)}
+                    next: break
+    - input_ok:
+        switch:
+          - condition: ${bad == null}
+            next: override_retry
+    - reject_input:  # notify first: fire-and-forget callers would otherwise trade a wrong window for no run at all
+        steps:
+          - notify_bad_input:
+              call: notify
+              args:
+                event_type: job_failed
+                execution: null
+                summary: ${bad + "; expected " + shape}
+                labels: ${empty}
+                extra:
+                  input: ${json.encode_to_string(input)}
+          - raise_bad_input:
+              raise: ${bad + "; expected " + shape}
 
     - override_retry:  # fail-soft: a bad value keeps RETRY_COUNT; a run can lower retries, never raise them
         switch:

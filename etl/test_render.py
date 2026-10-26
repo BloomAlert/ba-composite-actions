@@ -5,6 +5,7 @@ Without LIVE_JSON it uses a synthetic snapshot; with one (from etl/live.sh) it p
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -284,12 +285,31 @@ def main():
                              ' + [.. | select(tag == "!!map" and has("post")) | .post.try.args.body.event.summary]',
                              wf_path)
     assert has_except and summary == "${default(cause, summary)}", (has_except, summary)
-    # next: per-run opt-out "chain": false (non-bool fails fast); the next run gets the input minus "chain"
-    check, cond, argument = yq('[.. | select(tag == "!!map" and has("check_chain")) | .check_chain.switch[0].condition]'
-                               ' + [.. | select(tag == "!!map" and has("start_next")) | .start_next.switch[0]'
-                               ' | (.condition, .steps[0].create_next_execution.args.body.argument)]', wf_path)
-    assert "get_type(chain)" in check and "chain" in cond and 'map.delete(map.delete(input, "chain"), "retry")' in argument, \
-        (check, cond, argument)
+    # #21: input is validated (map, allowlisted keys, types) before any map.get, notified, then raised
+    steps = yq('[.main.steps[] | keys[0]]', wf_path)
+    assert steps.index("check_input") < steps.index("read_input") < steps.index("override_retry") \
+        and steps.index("check_types") < steps.index("reject_input") < steps.index("override_retry"), steps
+    assert "map.get" not in json.dumps(yq('.main.steps[0]', wf_path)), "init must not read input before check_input"
+    allowed, keys_cond, types, items, reject = yq(
+        '[(.main.steps[0].init.assign[] | select(has("allowed")) | .allowed)]'
+        ' + [.. | select(tag == "!!map" and has("unknown_key")) | .unknown_key.switch[0].condition]'
+        ' + [[.. | select(tag == "!!map" and has("check_types")) | .check_types.switch[].condition]]'
+        ' + [.. | select(tag == "!!map" and has("non_string_arg")) | .non_string_arg.switch[0].condition]'
+        ' + [[.. | select(tag == "!!map" and has("reject_input")) | .reject_input.steps[] | keys[0]]]', wf_path)
+    assert allowed == ["args", "labels", "chain", "retry"] and keys_cond == "${not(key in allowed)}", (allowed, keys_cond)
+    assert all(f'get_type({v})' in " ".join(types) for v in ("final_args_list", "labels", "chain")), types
+    assert items == '${get_type(arg) != "string"}' and reject == ["notify_bad_input", "raise_bad_input"], (items, reject)
+    # every scheduler body the examples render passes that allowlist
+    for ex, decl in (("ews", "runtime.yaml"), ("stormglass", "runtime.yaml"), ("cmems", "maps.yaml")):
+        for cmd in render(ex, decl).stdout.splitlines():
+            for tok in shlex.split(cmd) if cmd.startswith("gcloud scheduler jobs") else []:
+                if tok.startswith("--message-body="):
+                    arg = json.loads(json.loads(tok.split("=", 1)[1])["argument"])
+                    assert set(arg) <= set(allowed) and all(isinstance(a, str) for a in arg["args"]), (ex, arg)
+    # next: per-run opt-out "chain": false; the next run gets the input minus "chain"
+    cond, argument = yq('[.. | select(tag == "!!map" and has("start_next")) | .start_next.switch[0]'
+                        ' | (.condition, .steps[0].create_next_execution.args.body.argument)]', wf_path)
+    assert "chain" in cond and 'map.delete(map.delete(input, "chain"), "retry")' in argument, (cond, argument)
     conds, clamp, nxt = yq('[[.. | select(tag == "!!map" and has("override_retry")) | .override_retry.switch[].condition]]'
                            ' + [.. | select(tag == "!!map" and has("clamp_retry")) | .clamp_retry'
                            ' | (.assign[0].max_attempts, .next)]', wf_path)
