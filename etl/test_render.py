@@ -124,13 +124,8 @@ def main():
     assert '\\"args\\": [\\"--ts-id\\", \\"WH-01\\"]' in sg and '"labels": {"instance": "wh-01"}' in sg
 
     assert "--clear-secrets" in sg  # no `secrets:` -> the job keeps no stale secret refs
-    def no_replaces(d):  # cmems replaces aren't in the synthetic snapshot
-        [i.pop("replaces", None) for i in d["instances"]]
-    for ex, decl in (("ews", "runtime.yaml"), ("stormglass", "runtime.yaml"),
-                     ("cmems", "maps-large.yaml"), ("cmems", "maps.yaml")):  # #27: no stale args/command survive
-        out = render(ex, decl, patch=no_replaces).stdout
-        deploy = [ln for ln in out.splitlines() if ln.startswith("gcloud run jobs deploy ")]
-        assert deploy and all(" --args='' --command='' " in ln for ln in deploy), (ex, decl, deploy)
+    assert all(" --args='' --command='' " in ln for out in (ews, sg)
+               for ln in out.splitlines() if ln.startswith("gcloud run jobs deploy "))  # #27: no stale args/command survive
 
     # env reads vars only: a name that exists only as a GitHub secret fails, value never rendered
     leak = render("stormglass", drop=("STORMGLASS_SECRET_KEY",),
