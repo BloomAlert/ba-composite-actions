@@ -179,7 +179,7 @@ Workflow etl/workflow.yaml (generic, one per flow)
      - daily: 25h, the alerting maximum
      - no instances, or anything else (day-of-week/month, names, ranges) needs `heartbeat_window` or `heartbeat: false`, otherwise the deploy fails
      - with several instances, the smallest window wins
-   - The policy is created in the same run as its metric. A just-created metric can lag, so the create retries (5 tries, 20 s apart) only on a "metric unknown" error; any other error fails the deploy.
+   - The policy is created in the same run as its metric. A just-created metric can lag, so the create retries (10 tries, 60 s apart: GCP says a new metric can take up to 10 min to show) only on a "metric unknown" error; any other error fails the deploy.
    - A newly created policy is **snoozed for its first window** (`<metric>-first-window`), so a metric with no data yet can't raise a false alarm. A snooze failure (e.g. a missing IAM role) is a `::warning::`, never a failed deploy; the cost is one early incident. Updating an existing policy never snoozes it.
 
 **RUN-05 (Artifact Registry):**

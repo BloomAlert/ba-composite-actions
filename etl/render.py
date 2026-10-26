@@ -268,19 +268,21 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
         if (v := upsert("policies", metric)) == "update":
             cmds.append(f"# {v}\ngcloud monitoring policies update {live_names['policies'][metric]['name']}"
                         f' --project={project} --policy-from-file="$ETL_OUT/heartbeat-policy.json"')
-        else:  # retry only "metric unknown" (a just-created metric may lag); any other error fails the deploy
+        else:  # retry only "metric unknown" (a new metric can take up to 10 min to show); any other error fails
+            tries = 10
             cmds.append(
-                f"# {v}\nfor try in 1 2 3 4 5; do\n"
+                f"# {v}\nfor try in {' '.join(map(str, range(1, tries + 1)))}; do\n"
                 f"  if POLICY=$(gcloud monitoring policies create --project={project}"
                 ' --policy-from-file="$ETL_OUT/heartbeat-policy.json" --format=\'value(name)\' 2>"$ETL_OUT/policy.err"); then break; fi\n'
                 '  cat "$ETL_OUT/policy.err" >&2\n'
-                '  grep -qiE \'metric.*(unknown|not found|cannot find|does not exist)\' "$ETL_OUT/policy.err" && [ "$try" -lt 5 ] || exit 1\n'
-                "  sleep 20\ndone\n"
+                '  grep -qiE \'cannot find metric|metric.*(unknown|not found|does not exist)\' "$ETL_OUT/policy.err"'
+                f' && [ "$try" -lt {tries} ] || exit 1\n'
+                "  sleep 60\ndone\n"
                 # no data yet = breach (EVALUATION_MISSING_DATA_ACTIVE): mute the first window; never fail the deploy
                 f"gcloud monitoring snoozes create --project={project} --criteria-policies=\"$POLICY\""
                 f" --display-name={q(metric + '-first-window')} --start-time=\"$(date -u +%FT%TZ)\""
                 f" --end-time=\"$(date -u -d '+{window} seconds' +%FT%TZ)\""
-                f" || echo \"::warning::heartbeat snooze not created for $POLICY (deploy SA needs"
+                f" || echo \"::warning::heartbeat snooze not created for $POLICY (e.g. deploy SA lacks"
                 f" roles/monitoring.snoozeEditor); it may alert before {metric} gets its first data\"")
     else:
         cmds.append("# heartbeat: disabled in the declaration (heartbeat: false)")

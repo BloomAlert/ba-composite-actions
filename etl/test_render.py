@@ -118,8 +118,23 @@ def main():
                                     "gcloud monitoring snoozes create")]
     assert hb == sorted(hb) and "+90000 seconds" in sg, sg
     assert '"alignmentPeriod": "90000s"' in open(os.path.join(r.out, "heartbeat-policy.json")).read()
-    tries, sleep = re.search(r"for try in ([\d ]+);.*?sleep (\d+)", sg, re.S).group(1, 2)
-    assert (len(tries.split()) - 1) * int(sleep) < 1200  # retries stay well inside etl-deploy's 20-min job timeout
+    # 9 waits x 60s covers GCP's "up to 10 min" metric lag and stays inside etl-deploy's 20-min job timeout
+    assert "for try in 1 2 3 4 5 6 7 8 9 10;" in sg and "sleep 60" in sg
+    loop = sg[sg.index("for try in"):sg.index("done\n", sg.index("for try in")) + 5].replace("sleep 60", "sleep 0")
+    with tempfile.TemporaryDirectory() as d:  # run the rendered retry loop against a stub gcloud
+        stub = os.path.join(d, "gcloud")
+        with open(stub, "w") as f:
+            f.write('#!/bin/sh\nn=$(cat "$ETL_OUT/n" 2>/dev/null || echo 0); echo $((n+1)) > "$ETL_OUT/n"\n'
+                    '[ "$n" -ge "$FAILS" ] && { echo projects/p/alertPolicies/1; exit 0; }; echo "$ERR" >&2; exit 1\n')
+        os.chmod(stub, 0o755)
+        lag = ('ERROR: (gcloud.monitoring.policies.create) NOT_FOUND: Cannot find metric(s) that match type ='
+               ' "logging.googleapis.com/user/x". If a metric was created recently, it could take up to 10 minutes')
+        for fails, err, rc in ((2, lag, 0), (1, "PERMISSION_DENIED: no", 1), (10, lag, 1)):
+            for n in os.listdir(d):
+                n != "gcloud" and os.remove(os.path.join(d, n))
+            env = {**os.environ, "PATH": f"{d}:{os.environ['PATH']}", "ETL_OUT": d, "FAILS": str(fails), "ERR": err}
+            got = subprocess.run(["bash", "-c", loop], env=env, capture_output=True).returncode
+            assert got == rc, (fails, err, got)
     for secret in [*SECRETS.values(), NASTY]:  # (2) no value from env files/secrets in the plan
         assert secret not in sg, secret
     assert '--service-account="$S_GCP_WORKFLOW_SERVICE_ACCOUNT"' in sg
