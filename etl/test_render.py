@@ -109,7 +109,8 @@ def main():
     assert '"alignmentPeriod": "3600s"' in open(os.path.join(r.out, "heartbeat-policy.json")).read()  # */15 -> 1h
     img = f"{R}-docker.pkg.dev/{P}/etl-ingestion-ews-gcp-staging/main"  # RUN-05: right after the job deploy
     assert lines(ews, "gcloud artifacts docker tags add ") == [i + 1 for i in lines(ews, "gcloud run jobs deploy ")]
-    assert f"tags add {img}:abc123 {img}:deployed --quiet" in ews
+    tag = f"gcloud artifacts docker tags add {img}:abc123 {img}:deployed --quiet"
+    assert f"{tag} || {tag}\n" in ews  # retried once: parallel flows sharing an image race on the tag
 
     r = render("stormglass")
     sg = r.stdout
