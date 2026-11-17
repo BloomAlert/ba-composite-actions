@@ -9,6 +9,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -109,7 +110,7 @@ def main():
     assert '"alignmentPeriod": "3600s"' in open(os.path.join(r.out, "heartbeat-policy.json")).read()  # */15 -> 1h
     img = f"{R}-docker.pkg.dev/{P}/etl-ingestion-ews-gcp-staging/main"  # RUN-05: right after the job deploy
     assert lines(ews, "gcloud artifacts docker tags add ") == [i + 1 for i in lines(ews, "gcloud run jobs deploy ")]
-    assert f"tags add {img}:abc123 {img}:deployed --quiet" in ews
+    assert f"tags add {img}:abc123 {img}:deployed-etl-ews-ingestion-staging --quiet\n" in ews  # per job: no race
 
     r = render("stormglass")
     sg = r.stdout
@@ -269,10 +270,14 @@ def main():
     # (10) + RUN-05: untagged image refs mean :latest; build's inline policy == etl/ar-cleanup-policy.json
     sys.dont_write_bytecode = True
     sys.path.insert(0, HERE)
-    from ar_cleanup import deployed
+    from ar_cleanup import deployed, to_delete
     ar = f"{R}-docker.pkg.dev/{P}/repo-staging/"
     assert deployed({"jobs": [{"image": ar + "main"}, {"image": ar + "main:abc"},
                               {"image": ar + "main@sha256:ff"}]}, ar) == ({"latest", "abc"}, {"sha256:ff"})
+    old = {"package": "main", "createTime": "2020-01-01T00:00:00Z"}  # tags match as prefixes, like AR's tagPrefixes
+    assert [v["version"] for v in to_delete([{**old, "version": "a", "tags": "deployed-etl-x-staging"},
+                                             {**old, "version": "b", "tags": "other"}],
+                                            {"deployed"}, set(), datetime.now(timezone.utc), 0)] == ["b"]
     build = open(os.path.join(ROOT, ".github", "workflows", "etl-build.yaml")).read()
     inline = build.split("<<'JSON'\n", 1)[1].split("\n          JSON", 1)[0]
     assert json.loads(inline) == json.load(open(os.path.join(HERE, "ar-cleanup-policy.json")))
