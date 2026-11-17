@@ -38,7 +38,8 @@ def deployed(live, ar_path):
 
 
 def to_delete(images, tags_kept, digests_kept, now, keep_n):
-    """Mirror of the policy: keep newest keep_n per package + deployed; delete other tagged, untagged > 7d."""
+    """Mirror of the policy: keep newest keep_n per package + deployed; delete other tagged, untagged > 7d.
+    tags_kept are prefixes, as in the policy's tagPrefixes."""
     out, by_pkg = [], {}
     for im in images:
         by_pkg.setdefault(im["package"], []).append(im)
@@ -52,7 +53,8 @@ def to_delete(images, tags_kept, digests_kept, now, keep_n):
     for versions in by_pkg.values():
         versions.sort(key=lambda v: v["createTime"], reverse=True)
         kept = {v["version"] for i, v in enumerate(versions)
-                if i < keep_n or v["version"] in digests_kept or set(tags_of(v)) & tags_kept}
+                if i < keep_n or v["version"] in digests_kept
+                or any(t.startswith(p) for t in tags_of(v) for p in tags_kept)}
         kept_times = [ts(v) for v in versions if v["version"] in kept]
         for v in versions:
             if v["version"] in kept:
@@ -76,7 +78,7 @@ def main():
         for s in gcloud("run", "services", "list", f"--project={project}", f"--region={region}"))
     base = json.load(open(os.path.join(HERE, "ar-cleanup-policy.json")))
     keep_n = next(r["mostRecentVersions"]["keepCount"] for r in base if "mostRecentVersions" in r)
-    # ponytail: exact match on the base Keep rules' tagPrefixes (only `deployed` exists); estimate only
+    # the base Keep rules' tagPrefixes (`deployed` covers etl-deploy's per-job `deployed-<job>` tags)
     keep_tags = {t for r in base if r["action"]["type"] == "Keep" for t in r.get("condition", {}).get("tagPrefixes", [])}
     now, total = datetime.now(timezone.utc), 0
     for repo in gcloud("artifacts", "repositories", "list", f"--project={project}", f"--location={region}"):

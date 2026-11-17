@@ -160,7 +160,7 @@ Workflow etl/workflow.yaml (generic, one per flow)
 `etl/live.sh` takes a read-only snapshot of jobs, workflows, schedulers, `etl-heartbeat-*` metrics and policies, and which of the declaration's `secrets:` exist. `etl/render.py` turns the declaration plus that snapshot into a bash plan, where each resource is a `create` or an `update`:
 
 1. `run jobs deploy <job> --image=<image>:<sha> --env-vars-file --set-secrets|--clear-secrets --args='' --command=''` (fails before anything changes if the image wasn't built)
-   - then `artifacts docker tags add <image>:<sha> <image>:deployed` (RUN-05): moves the image name's `deployed` tag to what the job now runs. Flows sharing an image (cmems `map`, user-tracking `main`) share the tag; they deploy the same commit, in parallel, so the step retries once (`tags add` is get-then-create and the loser of the race gets `ALREADY_EXISTS`).
+   - then `artifacts docker tags add <image>:<sha> <image>:deployed-<job>` (RUN-05): moves this job's own tag to what it now runs. The tag is per job, so flows sharing an image (cmems `map`, user-tracking `main`) never race on it (a shared tag failed with `ALREADY_EXISTS`) and each live job's digest is kept even when they end on different commits.
 2. `workflows deploy <wf> --source=etl/workflow.yaml --env-vars-file`. `etl-deploy` checks this repo out at its own commit (OIDC `job_workflow_sha`).
 3. **Orphans (RUN-04),** right after the workflow, before the schedulers:
    - What counts as an orphan:
@@ -186,7 +186,8 @@ Workflow etl/workflow.yaml (generic, one per flow)
 
 **RUN-05 (Artifact Registry):**
 - `etl-build` sets the cleanup policy once, when it creates `<repo>-<env>` ([`etl/ar-cleanup-policy.json`](../etl/ar-cleanup-policy.json)):
-  - keep the version tagged `deployed` (what `etl-deploy` last deployed of each image)
+  - keep versions whose tag starts with `deployed` (`deployed-<job>`: what `etl-deploy` last deployed to each job)
+  - the plain `:deployed` tag from before v1.7.1 no longer moves (and stays kept). Delete it (`gcloud artifacts docker tags delete <image>:deployed`) once the repo is on v1.7.1+ and every flow on that image has redeployed in both envs (each has its `deployed-<job>` tag).
   - keep the 30 most recent versions of each image (~10 single-platform builds: each buildx push is an index + image + provenance attestation)
   - delete all other tagged versions
   - delete untagged versions older than 7 days

@@ -208,10 +208,9 @@ def plan(decl, env, repo, sha, ci_dir, vars_, secrets, live, mode):
         f" --memory={job['memory']} --task-timeout={timeout}s --max-retries=0 --args='' --command='' --quiet"
         ' --env-vars-file="$ETL_OUT/job-env.yaml"'
         + (f" --set-secrets={q(','.join(set_secrets))}" if set_secrets else " --clear-secrets")),
-        # RUN-05: only once the job runs this image; moves this image name's :deployed (AR keep-deployed rule).
-        # One retry: parallel flows sharing an image race tags add's get-then-create (ALREADY_EXISTS); the
-        # retry sees the tag and moves it, a no-op when it already points here.
-        " || ".join([f"gcloud artifacts docker tags add {q(image)} {q(image_path + ':deployed')} --quiet"] * 2),
+        # RUN-05: only once the job runs this image; per-job tag, so flows sharing an image never race on it
+        # and each live job's digest is kept (AR keep-deployed rule matches the `deployed` prefix)
+        f"gcloud artifacts docker tags add {q(image)} {q(f'{image_path}:deployed-{job_name}')} --quiet",
         (f"# {upsert('workflows', wf_name)}\ngcloud workflows deploy {wf_name} --project={project}"
         f" --location={region} --source={q(ci_dir + '/etl/workflow.yaml')}"
         f" --service-account={token('GCP_WORKFLOW_SERVICE_ACCOUNT')} --quiet"
