@@ -1,0 +1,202 @@
+# Reusable CI/CD for Python Cloud Run services (ba-infra#47); see docs/service-cloudrun.md.
+# pull_request: test + build (no push). push / workflow_dispatch on staging|prod: test -> build :<sha> -> deploy.
+# The AR repo, the image and the Cloud Run service are all named <repo>-<environment>.
+name: service-cloudrun
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: staging | prod; on push/dispatch it must equal the branch (callers pass github.base_ref || github.ref_name)
+        type: string
+        required: true
+      test-database-url:
+        description: Non-empty starts postgres:18 (user postgres, password test, db postgres) for the tests and exports it as TEST_DATABASE_URL
+        type: string
+        default: ""
+      cloudrun-flags:
+        description: gcloud run deploy flags. ${NAME} resolves from the environment's GitHub vars (a caller cannot read environment vars)
+        type: string
+        required: true
+      cloudrun-env-vars:
+        description: KEY=VALUE lines; ${NAME} resolves like in cloudrun-flags
+        type: string
+        default: ""
+      cloudrun-env-vars-update-strategy:
+        description: merge keeps env vars not listed; overwrite removes them
+        type: string
+        default: merge
+    secrets:
+      GCP_WORKLOAD_IDENTITY_PROVIDER:
+        required: true
+      GCP_ARTIFACT_REGISTRY_WRITER_SA:
+        required: true
+      GCP_DEPLOY_SERVICE_ACCOUNT:
+        required: true
+
+permissions: {}
+
+env:
+  UV_VERSION: "0.13.6" # keep equal to the services' Dockerfile uv
+
+jobs:
+  test:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    services:
+      postgres:
+        image: ${{ inputs.test-database-url != '' && 'postgres:18' || '' }} # empty image = no service
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: ${{ inputs.test-database-url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # bloompy comes from Artifact Registry through keyring, as in the Dockerfiles
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_ARTIFACT_REGISTRY_WRITER_SA }}
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          uv tool install keyring --with keyrings.google-artifactregistry-auth
+          uv sync --frozen
+
+      - name: Lint
+        run: uv run --frozen ruff check .
+
+      - name: Format
+        run: uv run --frozen ruff format --check .
+
+      - name: Test
+        run: uv run --frozen pytest -q
+
+  build:
+    needs: test
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - name: Guard environment
+        if: github.event_name != 'pull_request'
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          # the image is tagged with github.sha, so it must come from the env branch
+          [[ "$ENVIRONMENT" =~ ^(staging|prod)$ && "$ENVIRONMENT" == "$GITHUB_REF_NAME" ]] \
+            || { echo "::error::environment '$ENVIRONMENT' must be staging|prod and equal the ref '$GITHUB_REF_NAME'"; exit 1; }
+
+      # checked out under src/ so auth's gha-creds-*.json stays out of the build context
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: src
+          persist-credentials: false
+
+      - id: meta
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION }}
+        run: |
+          NAME="${GITHUB_REPOSITORY#*/}-${ENVIRONMENT}"
+          echo "image=${REGION}-docker.pkg.dev/${PROJECT}/${NAME}/${NAME}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_ARTIFACT_REGISTRY_WRITER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Docker auth
+        if: github.event_name != 'pull_request'
+        run: gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: src
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.image }}
+          build-args: index_url=${{ vars.BLOOMPY_GAR_PATH }}
+          # short-lived WIF credentials file (no JSON key) for the Dockerfiles' bloompy keyring install
+          secret-files: gar_service_account=${{ steps.auth.outputs.credentials_file_path }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-${{ github.repository }}-${{ inputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - id: render
+        env:
+          VARS: ${{ toJSON(vars) }}
+          FLAGS: ${{ inputs.cloudrun-flags }}
+          ENV_VARS: ${{ inputs.cloudrun-env-vars }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          # only ${NAME} of a defined var is replaced; anything left is a missing var, so fail before deploying
+          eval "$(jq -r 'to_entries[] | "export \(.key)=\(.value | @sh)"' <<<"$VARS")"
+          names=$(jq -r 'keys | map("${" + . + "}") | join(" ")' <<<"$VARS")
+          flags=$(envsubst "$names" <<<"$FLAGS")
+          env_vars=$(envsubst "$names" <<<"$ENV_VARS")
+          # shellcheck disable=SC2016 # the literal ${NAME} is the pattern
+          if left=$(grep -o '\${[A-Za-z_][A-Za-z0-9_]*}' <<<"$flags$env_vars"); then
+            echo "::error::undefined vars in environment '$ENVIRONMENT': ${left//$'\n'/ }"; exit 1
+          fi
+          { echo "flags<<EOF_FLAGS"; echo "$flags"; echo "EOF_FLAGS"
+            echo "env_vars<<EOF_ENV"; echo "$env_vars"; echo "EOF_ENV"; } >> "$GITHUB_OUTPUT"
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - id: deploy
+        uses: google-github-actions/deploy-cloudrun@2028e2d7d30a78c6910e0632e48dd561b064884d # v3.0.1
+        with:
+          service: ${{ github.event.repository.name }}-${{ inputs.environment }}
+          region: ${{ vars.GCP_REGION }}
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          image: ${{ needs.build.outputs.image }}
+          gcloud_component: beta
+          flags: ${{ steps.render.outputs.flags }}
+          env_vars: ${{ steps.render.outputs.env_vars }}
+          env_vars_update_strategy: ${{ inputs.cloudrun-env-vars-update-strategy }}
+
+      - run: echo "${{ steps.deploy.outputs.url }}"

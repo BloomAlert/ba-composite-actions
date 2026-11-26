@@ -23,6 +23,10 @@ GitHub workspace. Downstream repositories that build or package workspace
 contents should ignore this pattern in `.gitignore`, `.dockerignore`, and any
 similar artifact include/exclude configuration.
 
+## Service reusable workflow
+
+`.github/workflows/service-cloudrun.yaml` is test → build → deploy for the Python Cloud Run services, with WIF auth; see [docs/service-cloudrun.md](docs/service-cloudrun.md).
+
 ## ETL reusable workflows
 
 `.github/workflows/etl-build.yaml`, `etl-deploy.yaml` and `etl-conformance.yaml` are for the `etl-*` fleet; see [docs/etl-workflows.md](docs/etl-workflows.md).
